@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copytrader"
+version = "0.1.0"
+description = "Personal wallet analytics and risk-managed copy trading engine (Solana)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary - personal use" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "websockets>=13",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    "structlog>=24.1",
+    "prometheus-client>=0.20",
+    "cryptography>=43",
+    "solders>=0.21",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+]
+perf = ["uvloop>=0.19; sys_platform != 'win32'"]
+
+[project.scripts]
+copytrader = "copytrader.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+copytrader = ["web/*", "web/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning:websockets.*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF", "SIM"]
+ignore = [
+    "S101",   # assert in tests
+    "S311",   # random for simulation, not crypto
+    "RUF001", "RUF002", "RUF003",  # Spanish text with accents/ambiguous unicode
+    "B008",   # FastAPI Depends in defaults
+    "UP046", "UP047",  # keep TypeVar-style generics for readability
+    "S608",   # SQL built with SQLAlchemy, not strings
+    "ASYNC109",  # explicit timeout params are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]

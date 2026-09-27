@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local data & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+data/
+secrets/
+*.keystore.json
+*.key
+*.pem
+config/settings.yaml
+config/wallets.csv
+config/token_categories.yaml
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
