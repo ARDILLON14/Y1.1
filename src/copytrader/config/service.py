@@ -51,6 +51,7 @@ RUNTIME_MUTABLE_SECTIONS: frozenset[str] = frozenset(
 LOCKED_KEYS: frozenset[str] = frozenset(
     {
         "levels.live_trading_enabled",
+        "levels.require_arm",
         "execution.wallet_public_key",
         "execution.quote_mint",
     }

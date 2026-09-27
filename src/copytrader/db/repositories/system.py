@@ -121,9 +121,12 @@ class EventLogRepo:
         level: str = "info",
         trace_id: str | None = None,
         data: dict[str, Any] | None = None,
+        ts: datetime | None = None,
     ) -> None:
         self.s.add(
-            EventLog(component=component, event=event, level=level, trace_id=trace_id, data=data or {}, ts=utcnow())
+            EventLog(
+                component=component, event=event, level=level, trace_id=trace_id, data=data or {}, ts=ts or utcnow()
+            )
         )
 
     async def by_trace(self, trace_id: str) -> Sequence[EventLog]:

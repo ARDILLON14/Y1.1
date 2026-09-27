@@ -178,3 +178,79 @@ async def test_restart_recovery_expires_pending_entries(tmp_path, template_db):
     sig = (await _signals(c2))[-1]
     assert sig.status == SignalStatus.EXPIRED.value
     await c2.aclose()
+
+
+async def test_missed_source_exit_is_closed_by_safety_net(container, monkeypatch):
+    """The source sold everything but no EXIT signal ran (e.g. it sold while our entry was pending)."""
+    from copytrader.db.repositories import EventLogRepo, TransactionRepo
+    from copytrader.positions import manager as manager_mod
+
+    c = container
+    c.signals.start()
+    wallet = await _selected_wallet(c)
+    mint = good_token(c)
+    buy = live_swap(c, wallet.address, mint, Side.BUY, 500.0, before=0.0, after=None, sig="sn-buy")
+    await c.signals.on_swap(buy)
+    await c.signals.drain()
+    assert (await _positions(c))[0].status == PositionStatus.OPEN.value
+
+    qty = buy.token_amount
+    sell = live_swap(c, wallet.address, mint, Side.SELL, 510.0, qty=qty, before=qty, after=0.0, sig="sn-sell")
+    async with c.db.session() as s:  # stored by backfill/catch-up, never classified as EXIT
+        assert await TransactionRepo(s).insert_swap(wallet.id, sell) is not None
+
+    await c.positions.check_once()  # inside the grace period: the regular EXIT flow gets its chance
+    assert (await _positions(c))[0].status == PositionStatus.OPEN.value
+
+    monkeypatch.setattr(manager_mod, "SOURCE_EXIT_GRACE_SECONDS", 0.0)
+    await c.positions.check_once()
+    pos = (await _positions(c))[0]
+    assert pos.status == PositionStatus.CLOSED.value
+    assert "ya había vendido" in (pos.close_reason or "")
+
+    # One timeline per copied trade: the safety-net exit joins the entry's trace.
+    entry = (await _signals(c))[0]
+    async with c.db.session() as s:
+        events = [e.event for e in await EventLogRepo(s).by_trace(entry.trace_id)]
+    for expected in (
+        "signal_detected",
+        "decision_approved",
+        "order_created",
+        "order_confirmed",
+        "fill_applied",
+        "exit_triggered",
+        "position_closed",
+    ):
+        assert expected in events, events
+    assert events.index("signal_detected") < events.index("decision_approved") < events.index("exit_triggered")
+
+
+async def test_untracked_wallet_keeps_mirroring_exits_of_open_positions(container):
+    c = container
+    c.signals.start()
+    wallet = await _selected_wallet(c)
+    mint = good_token(c)
+    buy = live_swap(c, wallet.address, mint, Side.BUY, 500.0, before=0.0, after=None, sig="ut-buy")
+    await c.signals.on_swap(buy)
+    await c.signals.drain()
+    assert (await _positions(c))[0].status == PositionStatus.OPEN.value
+
+    await c.collector.untrack(wallet.address)
+    await c.refresh_tracking()
+    info = c.signals.wallet(wallet.address)
+    assert info is not None and not info.tracked and not info.selected
+    assert wallet.address in c.signals.tracked_addresses  # still subscribed, for its exits only
+
+    # New buys from the untracked wallet are never copied...
+    await c.signals.on_swap(live_swap(c, wallet.address, good_token(c), Side.BUY, 500.0, sig="ut-buy-2"))
+    await c.signals.drain()
+    assert len(await _signals(c)) == 1
+    # ...but its sell still closes the position we copied from it.
+    qty = buy.token_amount
+    sell = live_swap(c, wallet.address, mint, Side.SELL, 505.0, qty=qty, before=qty, after=0.0, sig="ut-sell")
+    await c.signals.on_swap(sell)
+    await c.signals.drain()
+    assert (await _positions(c))[0].status == PositionStatus.CLOSED.value
+
+    await c.refresh_tracking()  # nothing left open: the wallet is finally released
+    assert wallet.address not in c.signals.tracked_addresses

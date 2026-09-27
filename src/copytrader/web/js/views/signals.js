@@ -48,5 +48,51 @@ async function showSignal(id) {
       { label: "Factor", num: true, render: (st) => (st.factor === null ? "—" : num(st.factor, 3)) },
       { label: "Tamaño", num: true, render: (st) => usd(st.size_usd) },
     ], sizing)) : null,
+    (s.events || []).length ? h("div", { class: "section" }, h("h3", {}, "Línea temporal"), table([
+      { label: "Hora", render: (e) => h("span", { class: "nowrap mono small" }, timeOf(e.ts)) },
+      { label: "Componente", render: (e) => e.component },
+      { label: "Evento", render: (e) => EVENT_LABELS[e.event] || e.event },
+      { label: "Detalle", wrap: true, render: (e) => eventDetail(e.data || {}) },
+    ], s.events)) : null,
     h("p", { class: "small muted section" }, "Tx origen: ", h("span", { class: "mono" }, s.source_signature))));
+}
+
+const EVENT_LABELS = {
+  signal_detected: "Señal detectada",
+  decision_approved: "Decisión: aprobada",
+  decision_rejected: "Decisión: rechazada",
+  decision_expired: "Decisión: caducada",
+  decision_failed: "Decisión: fallida",
+  order_created: "Orden creada",
+  order_quoted: "Cotizada",
+  order_signed: "Firmada",
+  order_submitted: "Enviada",
+  order_confirmed: "Confirmada",
+  order_failed: "Orden fallida",
+  order_expired: "Orden caducada",
+  fill_applied: "Fill aplicado",
+  exit_triggered: "Salida disparada",
+  position_closed: "Posición cerrada",
+};
+
+function timeOf(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleTimeString("es-ES", { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+
+function eventDetail(d) {
+  const parts = [];
+  if (d.reason) parts.push(d.reason);
+  if (d.trigger) parts.push(`disparador ${d.trigger}`);
+  if (d.size_usd != null) parts.push(`tamaño ${usd(d.size_usd)}`);
+  if (d.value_usd != null) parts.push(`valor ${usd(d.value_usd)}`);
+  if (d.fill_price_usd != null) parts.push(`precio ${price(d.fill_price_usd)}`);
+  if (d.slippage_bps != null) parts.push(`slippage ${num(d.slippage_bps / 100, 2)}%`);
+  if (d.realized_pnl_usd != null) parts.push(`PnL ${usd(d.realized_pnl_usd)}`);
+  if (d.detection_latency_ms != null) parts.push(`latencia ${num(d.detection_latency_ms / 1000, 2)} s`);
+  if (d.ms != null) parts.push(`${num(d.ms, 0)} ms`);
+  if (d.error) parts.push(`error: ${d.error}`);
+  if (d.tx_signature) parts.push(`tx ${short(d.tx_signature, 6)}`);
+  return parts.join(" · ") || "—";
 }

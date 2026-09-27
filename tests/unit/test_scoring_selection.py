@@ -137,6 +137,15 @@ def test_selection_whitelist_priority_and_min_score():
     assert "Whitelist pero score" in res.reasons["wl_low"]
 
 
+def test_selection_whitelist_in_observe_is_not_selected():
+    """A manual whitelist never overrides a risk flag: OBSERVE is never copied."""
+    cfg = SelectionSection(top_n=2, min_score=60, whitelist_min_score=40)
+    cands = [_cand("a", 90), _cand("wl_obs", 95, lt=ListType.WHITELIST, status=WalletStatus.OBSERVE)]
+    res = select_wallets(cands, {"wl_obs"}, cfg)
+    assert res.addresses == {"a"}
+    assert "observación (whitelist)" in res.reasons["wl_obs"]
+
+
 def test_selection_top_n_is_configurable_without_code():
     cands = [_cand(str(i), 60 + i) for i in range(30)]
     for n in (5, 10, 20):

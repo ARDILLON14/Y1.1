@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from copytrader.core.clock import utcnow
 from copytrader.core.types import OrderStatus, PositionStatus, TradeMode
-from copytrader.db.models import EquitySnapshot, Execution, Order, Position, Signal
+from copytrader.db.models import EquitySnapshot, EventLog, Execution, Order, Position, Signal
 from copytrader.db.repositories._util import insert_ignore
 
 
@@ -67,7 +67,28 @@ class OrderRepo:
         new_id = await insert_ignore(self.s, Order, values, ["client_order_id"])
         order = await self.get_by_client_id(values["client_order_id"])
         assert order is not None
+        if new_id is not None:
+            self._timeline(order, "order_created", amount_in_raw=order.amount_in_raw, notional_usd=order.notional_usd)
         return order, new_id is not None
+
+    def _timeline(self, order: Order, event: str, **data: Any) -> None:
+        """Per-trace timeline (dashboard: signal detail → "Línea temporal")."""
+        self.s.add(
+            EventLog(
+                component="execution",
+                event=event,
+                level="warning" if event in ("order_failed", "order_expired") else "info",
+                trace_id=order.trace_id,
+                data={
+                    "order_id": order.id,
+                    "client_order_id": order.client_order_id,
+                    "purpose": order.purpose,
+                    "mode": order.mode,
+                    **{k: v for k, v in data.items() if v is not None},
+                },
+                ts=utcnow(),
+            )
+        )
 
     async def get(self, order_id: int) -> Order | None:
         return await self.s.get(Order, order_id)
@@ -104,12 +125,15 @@ class OrderRepo:
         if OrderStatus(order.status).is_terminal and status is not OrderStatus(order.status):
             # Terminal states are final: late callbacks must not resurrect an order.
             return
+        changed = order.status != status.value
         order.status = status.value
         order.updated_at = utcnow()
         if error is not None:
             order.error = error[:2000]
         for key, value in fields.items():
             setattr(order, key, value)
+        if changed:
+            self._timeline(order, f"order_{status.value}", error=error, tx_signature=fields.get("tx_signature"))
 
 
 class ExecutionRepo:
@@ -186,8 +210,17 @@ class PositionRepo:
         )
         return (await self.s.execute(stmt)).scalars().all()
 
-    async def list(self, *, status: str | None = None, mode: str | None = None, limit: int = 200) -> Sequence[Position]:
+    async def list(
+        self,
+        *,
+        status: str | None = None,
+        mode: str | None = None,
+        source_wallet_id: int | None = None,
+        limit: int = 200,
+    ) -> Sequence[Position]:
         stmt = select(Position).order_by(Position.id.desc()).limit(limit)
+        if source_wallet_id is not None:
+            stmt = stmt.where(Position.source_wallet_id == source_wallet_id)
         if status == "open":
             stmt = stmt.where(Position.status.in_([PositionStatus.OPEN.value, PositionStatus.CLOSING.value]))
         elif status:

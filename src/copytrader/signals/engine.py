@@ -39,7 +39,7 @@ from copytrader.core.types import (
 )
 from copytrader.db.base import Database
 from copytrader.db.models import Signal
-from copytrader.db.repositories import PositionRepo, SignalRepo, TransactionRepo, WalletRepo
+from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo, WalletRepo
 from copytrader.db.repositories.wallets import row_to_swap
 from copytrader.execution.mode import ModeController
 from copytrader.observability import metrics
@@ -58,6 +58,19 @@ class WalletInfo:
     score: float | None
     selected: bool
     exit_mode_override: ExitMode | None = None
+    # False for a wallet that is no longer tracked but still has open copied
+    # positions: it keeps being watched, only to mirror its exits.
+    tracked: bool = True
+
+
+def copyable(info: WalletInfo) -> bool:
+    """Single definition of "we may copy this wallet's buys" (engine and pipeline agree)."""
+    return (
+        info.tracked
+        and info.selected
+        and info.status is WalletStatus.ACTIVE
+        and info.list_type not in (ListType.BLACKLIST, ListType.WATCHLIST)
+    )
 
 
 @dataclass(slots=True)
@@ -106,8 +119,19 @@ class SignalEngine:
 
     # ------------------------------------------------------------------ state
     async def refresh_wallets(self) -> None:
+        """Tracked wallets, plus untracked ones that still have open copied positions.
+
+        Untracking a wallet must never orphan a position: its sells keep being
+        followed (EXIT only) until every position copied from it is closed.
+        """
         async with self.db.session() as s:
-            rows = await WalletRepo(s).list()
+            rows = list(await WalletRepo(s).list())
+            tracked_ids = {w.id for w in rows}
+            open_ids = {p.source_wallet_id for p in await PositionRepo(s).open_positions() if p.source_wallet_id}
+            for wallet_id in open_ids - tracked_ids:
+                w = await WalletRepo(s).get(wallet_id)
+                if w is not None:
+                    rows.append(w)
         self._wallets = {
             w.address: WalletInfo(
                 id=w.id,
@@ -116,8 +140,9 @@ class SignalEngine:
                 list_type=ListType(w.list_type),
                 status=WalletStatus(w.status),
                 score=w.score,
-                selected=w.selected,
+                selected=w.selected and w.is_tracked,
                 exit_mode_override=ExitMode(w.exit_mode_override) if w.exit_mode_override else None,
+                tracked=w.id in tracked_ids,
             )
             for w in rows
         }
@@ -151,6 +176,8 @@ class SignalEngine:
         level = self.mode.level
         if swap.side is Side.SELL and has_position and cfg.signals.follow_sells:
             return SignalAction.EXIT, "La wallet origen vende un token que copiamos"
+        if not info.tracked:
+            return SignalAction.IGNORE, "Wallet no seguida (solo se vigilan sus salidas)"
         if (swap.value_usd or 0.0) < cfg.signals.min_source_value_usd:
             return SignalAction.IGNORE, "Operación de origen demasiado pequeña"
         if level < OperatingLevel.ALERTS:
@@ -163,13 +190,14 @@ class SignalEngine:
                 if cfg.selection.alert_on_watchlist
                 else (SignalAction.IGNORE, "Watchlist sin alertas")
             )
-        copyable = info.selected and info.status is WalletStatus.ACTIVE
-        if copyable and swap.side is Side.BUY:
+        if copyable(info) and swap.side is Side.BUY:
             if level >= OperatingLevel.PAPER:
                 return SignalAction.COPY, "Wallet seleccionada compra"
             return SignalAction.ALERT, "Nivel 2: solo alertas"
         if info.status is WalletStatus.OBSERVE and cfg.selection.alert_on_observe:
             return SignalAction.ALERT, "Wallet en observación"
+        if swap.side is Side.SELL and copyable(info):
+            return SignalAction.IGNORE, "Venta sin posición copiada abierta"
         return SignalAction.IGNORE, "Wallet no seleccionada"
 
     # --------------------------------------------------------------- ingestion
@@ -211,6 +239,24 @@ class SignalEngine:
                         "created_at": self.clock.now(),
                     }
                 )
+                if signal_id is not None:
+                    await EventLogRepo(s).add(
+                        "signals",
+                        "signal_detected",
+                        trace_id=trace_id,
+                        ts=detected_at,
+                        data={
+                            "signal_id": signal_id,
+                            "wallet": swap.wallet,
+                            "token": swap.token_mint,
+                            "side": swap.side.value,
+                            "action": action.value,
+                            "reason": reason,
+                            "source_value_usd": swap.value_usd,
+                            "detection_latency_ms": swap.detection_latency_ms,
+                            "source": swap.source.value,
+                        },
+                    )
         metrics.SIGNALS.labels(action=action.value, status="detected").inc()
         if signal_id is None:
             return

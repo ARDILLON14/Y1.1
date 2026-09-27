@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 from sqlalchemy import func, select
 
 from copytrader.container import Container
+from copytrader.core.errors import CopyTraderError
 from copytrader.core.models import CheckResult
 from copytrader.core.types import TradeMode
 from copytrader.db.models import Position
+from copytrader.providers.solana.rpc import SolanaRpc
+
+# Slot times are estimates (±1-2 s) and "slot - 4" is ~1.6 s old: 10 s is well above the noise
+# while still far below the signal-age limits it protects.
+MAX_CLOCK_SKEW_SECONDS = 10.0
 
 
 async def run_preflight(c: Container) -> list[CheckResult]:
@@ -45,6 +49,7 @@ async def run_preflight(c: Container) -> list[CheckResult]:
     if rpc is not None:
         healthy = await rpc.get_health()
         add("rpc", "RPC de Solana saludable", healthy)
+        add(*await _clock_skew(c, rpc))
     signer = c.providers.signer
     if signer is not None and live is not None:
         try:
@@ -97,8 +102,21 @@ async def run_preflight(c: Container) -> list[CheckResult]:
         cfg.levels.level4.max_trade_usd <= cfg.risk.max_trade_usd,
         critical=False,
     )
-    _ = timedelta
     return checks
+
+
+async def _clock_skew(c: Container, rpc: SolanaRpc) -> tuple[str, str, bool, str]:
+    """Signal age, TTL and quote age are measured against the local clock: it must match the chain's."""
+    label = f"Reloj local sincronizado con la red (≤ {MAX_CLOCK_SKEW_SECONDS:.0f} s)"
+    try:
+        slot = await rpc.get_slot()
+        block_time = await rpc.get_block_time(max(0, slot - 4))  # the tip may not have a time yet
+    except CopyTraderError as exc:
+        return "clock_skew", label, False, f"no se pudo comprobar: {exc}"
+    if block_time is None:
+        return "clock_skew", label, False, "el RPC no devolvió la hora del bloque"
+    skew = c.clock.now().timestamp() - block_time
+    return "clock_skew", label, abs(skew) <= MAX_CLOCK_SKEW_SECONDS, f"desfase {skew:+.1f} s (activa NTP si es mayor)"
 
 
 def preflight_passed(checks: list[CheckResult]) -> bool:

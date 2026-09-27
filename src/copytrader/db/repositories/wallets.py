@@ -134,6 +134,15 @@ class TransactionRepo:
         )
         return (await self.s.execute(stmt)).scalars().all()
 
+    async def last_for_wallet_token(self, wallet_id: int, mint: str) -> WalletTransaction | None:
+        stmt = (
+            select(WalletTransaction)
+            .where(WalletTransaction.wallet_id == wallet_id, WalletTransaction.token_mint == mint)
+            .order_by(WalletTransaction.block_time.desc(), WalletTransaction.slot.desc(), WalletTransaction.id.desc())
+            .limit(1)
+        )
+        return (await self.s.execute(stmt)).scalar_one_or_none()
+
     async def count_for_wallet(self, wallet_id: int) -> int:
         stmt = select(func.count()).select_from(WalletTransaction).where(WalletTransaction.wallet_id == wallet_id)
         return int((await self.s.execute(stmt)).scalar_one())

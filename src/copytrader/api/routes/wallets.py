@@ -108,7 +108,7 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
         scores = await analytics.score_history(w.id, 200)
         txs = await TransactionRepo(s).recent_for_wallet(w.id, 50)
         n_tx = await TransactionRepo(s).count_for_wallet(w.id)
-        positions = await PositionRepo(s).list(limit=50)
+        positions = await PositionRepo(s).list(source_wallet_id=w.id, limit=50)
     return {
         "wallet": ser.wallet(w, m_all),
         "metrics": {
@@ -137,7 +137,7 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
             for t in txs
         ],
         "n_transactions": n_tx,
-        "positions": [ser.position(p) for p in positions if p.source_wallet_id == w.id],
+        "positions": [ser.position(p) for p in positions],
     }
 
 

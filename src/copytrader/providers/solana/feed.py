@@ -176,7 +176,7 @@ class SolanaSwapFeed:
                 if self._stopped.is_set():
                     return
                 try:
-                    cursor = await self._cursor(wallet)
+                    cursor = self.history.newest_scanned.get(wallet) or await self._cursor(wallet)
                     swaps = await self.history.fetch_swaps(
                         wallet,
                         since=None if cursor else since,

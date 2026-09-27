@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import itertools
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -16,8 +17,9 @@ from sqlalchemy import func, select
 
 from copytrader.core import ids
 from copytrader.core.models import OrderRequest
-from copytrader.core.types import OrderPurpose, OrderStatus, PositionStatus, Side, TradeMode
+from copytrader.core.types import OrderPurpose, OrderStatus, PositionStatus, Side, SignalStatus, TradeMode
 from copytrader.db.models import Execution, Order, Position
+from copytrader.db.repositories import EventLogRepo, SignalRepo, WalletRepo
 from copytrader.execution.live import LiveExecutor
 from copytrader.providers.interfaces import BuiltTransaction
 from copytrader.providers.solana.constants import SOL_MINT, TOKEN_ACCOUNT_RENT_LAMPORTS
@@ -187,7 +189,26 @@ async def test_confirmed_live_entry_persists_signature_before_send(live):
 async def test_timeout_keeps_order_pending_then_recovery_applies_fill_once(live):
     c, chain, mint = live
     chain.status = "pending"
-    result = await c.execution.execute(_entry(c, mint, "k2"), context={"decimals": 6})
+    async with c.db.session() as s:  # the pipeline leaves the signal APPROVED while the order is pending
+        wallet = (await WalletRepo(s).list())[0]
+        signal_id = await SignalRepo(s).create(
+            {
+                "signal_key": "k2",
+                "trace_id": "trace-k2",
+                "wallet_id": wallet.id,
+                "source_signature": "src-k2",
+                "token_mint": mint,
+                "side": "buy",
+                "action": "copy",
+                "status": SignalStatus.APPROVED.value,
+                "source_block_time": c.clock.now(),
+                "detected_at": c.clock.now(),
+                "operating_level": 4,
+                "created_at": c.clock.now(),
+            }
+        )
+    req = replace(_entry(c, mint, "k2"), signal_id=signal_id, trace_id="trace-k2")
+    result = await c.execution.execute(req, context={"decimals": 6})
     assert not result.success and result.error == "pending"
     async with c.db.session() as s:
         order = (await s.execute(select(Order))).scalar_one()
@@ -201,7 +222,11 @@ async def test_timeout_keeps_order_pending_then_recovery_applies_fill_once(live)
     assert await _count(c, Position) == 1
     async with c.db.session() as s:
         order = (await s.execute(select(Order))).scalar_one()
+        sig = await SignalRepo(s).get(signal_id)
+        events = [e.event for e in await EventLogRepo(s).by_trace("trace-k2")]
     assert order.status == OrderStatus.CONFIRMED.value
+    assert sig is not None and sig.status == SignalStatus.EXECUTED.value  # late fill settles the signal
+    assert events.count("fill_applied") == 1 and "order_submitted" in events
 
 
 async def test_expired_blockhash_marks_expired_and_never_resends(live):

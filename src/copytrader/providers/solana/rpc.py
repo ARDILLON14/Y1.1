@@ -93,6 +93,11 @@ class SolanaRpc:
     async def get_slot(self) -> int:
         return int(await self.call("getSlot", [{"commitment": self.commitment}]))
 
+    async def get_block_time(self, slot: int) -> int | None:
+        """Estimated production time (unix seconds) of a slot; ``None`` if unavailable."""
+        result = await self.call("getBlockTime", [slot], retry=_NO_RETRY)
+        return int(result) if result is not None else None
+
     async def get_health(self) -> bool:
         try:
             return await self.call("getHealth", retry=_NO_RETRY) == "ok"

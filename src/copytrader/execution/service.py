@@ -24,10 +24,10 @@ from copytrader.core.clock import Clock
 from copytrader.core.errors import ExecutionError
 from copytrader.core.events import EventBus, ExecutionFailed, TradeExecuted
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
-from copytrader.core.types import OrderPurpose, OrderStatus, TradeMode
+from copytrader.core.types import OrderPurpose, OrderStatus, SignalStatus, TradeMode
 from copytrader.db.base import Database
 from copytrader.db.models import Execution, Order
-from copytrader.db.repositories import ExecutionRepo, OrderRepo
+from copytrader.db.repositories import EventLogRepo, ExecutionRepo, OrderRepo, SignalRepo
 from copytrader.execution.base import Executor, OrderHandle
 from copytrader.execution.mode import ModeController
 from copytrader.observability import metrics
@@ -185,6 +185,17 @@ class ExecutionService:
         await self.finalize(order_id, result)
         return result
 
+    @staticmethod
+    async def _settle_entry_signal(s: AsyncSession, order: Order, status: SignalStatus, reason: str) -> None:
+        """An entry left pending (APPROVED) resolves later: reflect the outcome on its signal."""
+        if order.purpose != OrderPurpose.ENTRY.value or order.signal_id is None:
+            return
+        sig = await SignalRepo(s).get(order.signal_id)
+        # DETECTED: the pipeline has not recorded its decision yet (it will keep this outcome).
+        if sig is not None and sig.status in (SignalStatus.APPROVED.value, SignalStatus.DETECTED.value):
+            sig.status = status.value
+            sig.reason = reason
+
     async def finalize(self, order_id: int, result: ExecutionResult) -> None:
         """Apply a successful fill atomically, or record the failure. Idempotent."""
         if result.success:
@@ -225,6 +236,22 @@ class ExecutionService:
                     if row is not None:
                         row.realized_pnl_usd = realized
                 await OrderRepo(s).set_status(order.id, OrderStatus.CONFIRMED, tx_signature=result.tx_signature)
+                await EventLogRepo(s).add(
+                    "execution",
+                    "fill_applied",
+                    trace_id=order.trace_id,
+                    data={
+                        "order_id": order.id,
+                        "position_id": order.position_id,
+                        "value_usd": result.value_usd,
+                        "fill_price_usd": result.fill_price_usd,
+                        "slippage_bps": result.slippage_bps,
+                        "fees_usd": result.fees_usd,
+                        "realized_pnl_usd": realized,
+                        "tx_signature": result.tx_signature,
+                    },
+                )
+                await self._settle_entry_signal(s, order, SignalStatus.EXECUTED, "Copiada (confirmación tardía)")
                 mode, purpose, side, token_mint = order.mode, order.purpose, order.side, order.token_mint
                 pos_id, trace_id = order.position_id, order.trace_id
             metrics.ORDERS.labels(mode=mode, purpose=purpose, status="confirmed").inc()
@@ -260,6 +287,10 @@ class ExecutionService:
         async with self.db.session() as s:
             await OrderRepo(s).set_status(order_id, status, error=result.error)
             order = await OrderRepo(s).get(order_id)
+            if order is not None and not pending:
+                await self._settle_entry_signal(
+                    s, order, SignalStatus.FAILED, f"Orden no ejecutada: {result.error or 'error'}"
+                )
         if order is None or pending:
             if pending:
                 log.warning("order_pending_confirmation", order=result.client_order_id)

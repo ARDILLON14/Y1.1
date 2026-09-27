@@ -38,6 +38,9 @@ class RpcHistorySource:
         self.quote_mints = quote_mints
         self._sem = asyncio.Semaphore(concurrency)
         self.clock = clock or SystemClock()
+        # Newest signature fully scanned per wallet (swap or not). Lets periodic
+        # catch-up skip non-swap activity instead of re-downloading it each time.
+        self.newest_scanned: dict[str, str] = {}
 
     async def list_signatures(
         self, wallet: str, *, since: datetime | None, until_signature: str | None, max_signatures: int
@@ -75,15 +78,19 @@ class RpcHistorySource:
             wallet, since=since, until_signature=until_signature, max_signatures=max_signatures
         )
         now = self.clock.now()
+        incomplete = False
 
         async def one(item: dict[str, Any]) -> list[SwapEvent]:
+            nonlocal incomplete
             async with self._sem:
                 try:
                     tx = await self.rpc.get_transaction(item["signature"])
                 except CopyTraderError as exc:
                     log.warning("history_tx_fetch_failed", wallet=wallet, error=str(exc))
+                    incomplete = True
                     return []
             if not tx:
+                incomplete = True  # not queryable yet: must be retried next time
                 return []
             bt = tx.get("blockTime")
             sol_price = await self.sol_prices.sol_price_at(from_unix(bt)) if bt else None
@@ -101,6 +108,8 @@ class RpcHistorySource:
                 return []
 
         results = await asyncio.gather(*(one(item) for item in sigs))
+        if sigs and not incomplete and len(sigs) < max_signatures:
+            self.newest_scanned[wallet] = sigs[0]["signature"]
         swaps = [s for group in results for s in group]
         swaps.sort(key=lambda s: (s.block_time, s.slot))
         return swaps

@@ -40,7 +40,7 @@ from copytrader.core.types import (
 )
 from copytrader.db.base import Database
 from copytrader.db.models import Order, Position
-from copytrader.db.repositories import PositionRepo, SignalRepo
+from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
 from copytrader.positions.exits import ExitDecision, PositionView, evaluate_exit, source_sell_fraction
@@ -49,6 +49,7 @@ from copytrader.signals.engine import SignalContext
 
 log = structlog.get_logger(__name__)
 DUST_FRACTION = 0.001
+SOURCE_EXIT_GRACE_SECONDS = 20.0
 
 
 class PositionManager:
@@ -157,6 +158,17 @@ class PositionManager:
             pos.closed_at = now
             pos.close_reason = ctx.get("reason", "cerrada")
             total_return = (pos.realized_pnl_usd / pos.initial_cost_usd * 100) if pos.initial_cost_usd else None
+            await EventLogRepo(session).add(
+                "positions",
+                "position_closed",
+                trace_id=order.trace_id,
+                data={
+                    "position_id": pos.id,
+                    "reason": pos.close_reason,
+                    "realized_pnl_usd": round(pos.realized_pnl_usd, 4),
+                    "return_pct": None if total_return is None else round(total_return, 2),
+                },
+            )
             self.bus.publish(
                 PositionClosed(
                     position_id=pos.id,
@@ -220,8 +232,18 @@ class PositionManager:
                 qty = pos.qty_raw if fraction >= 0.999 else int(pos.qty_raw * fraction)
                 if qty <= 0:
                     return None
+                if trace_id is None and pos.entry_signal_id:
+                    # SL/TP/time exits join the entry's trace: one timeline per copied trade
+                    entry = await SignalRepo(s).get(pos.entry_signal_id)
+                    trace_id = entry.trace_id if entry else None
                 pos.exit_seq += 1
                 pos.status = PositionStatus.CLOSING.value
+                await EventLogRepo(s).add(
+                    "positions",
+                    "exit_triggered",
+                    trace_id=trace_id,
+                    data={"position_id": pos.id, "trigger": trigger, "fraction": round(fraction, 4), "reason": reason},
+                )
                 seq, mode, decimals = pos.exit_seq, TradeMode(pos.mode), pos.decimals
                 price = pos.last_price_usd
                 ctx: dict[str, Any] = {
@@ -346,6 +368,13 @@ class PositionManager:
         except CopyTraderError as exc:
             log.warning("position_prices_failed", error=str(exc))
             prices = {}
+        for p in positions:
+            if p.token_mint not in prices:
+                # No market price (indexer lag, delisted pair...): the executable sell
+                # quote is the price that matters for SL/TP anyway.
+                quoted = await self._quote_exit_price(p)
+                if quoted is not None:
+                    prices[p.token_mint] = quoted
         now = self.clock.now()
         to_exit: list[tuple[int, ExitDecision]] = []
         async with self.db.session() as s:
@@ -370,6 +399,12 @@ class PositionManager:
                 decision = evaluate_exit(view, price, now, cfg.exits)
                 if decision is not None:
                     to_exit.append((p.id, decision))
+        exiting = {pid for pid, _ in to_exit}
+        for p in positions:
+            if p.id not in exiting and p.status == PositionStatus.OPEN.value:
+                missed = await self._missed_source_exit(p)
+                if missed is not None:
+                    to_exit.append((p.id, missed))
         for pid, decision in to_exit:
             retry_at, _ = self._backoff.get(pid, (0.0, 0))
             if self.clock.monotonic() < retry_at:
@@ -377,6 +412,56 @@ class PositionManager:
             await self.exit_position(
                 pid, decision.fraction, decision.trigger, decision.reason, tp_level=decision.tp_level
             )
+
+    async def _quote_exit_price(self, p: Position) -> float | None:
+        """USD price per token implied by a sell quote for the whole position."""
+        if p.qty_raw <= 0:
+            return None
+        cfg = self._config()
+        try:
+            sol_price = await self.tokens.sol_price()
+            if not sol_price:
+                return None
+            quote = await self.execution.executor(TradeMode(p.mode)).quote(
+                p.token_mint, cfg.execution.quote_mint, p.qty_raw, int(cfg.exits.exit_slippage_pct * 100)
+            )
+        except CopyTraderError as exc:
+            log.debug("exit_quote_failed", position=p.id, error=str(exc))
+            return None
+        tokens = p.qty_raw / 10**p.decimals
+        return (quote.out_amount_raw / 10**9 * sol_price) / tokens if tokens > 0 else None
+
+    async def _missed_source_exit(self, p: Position) -> ExitDecision | None:
+        """Safety net: the source wallet fully exited but no mirror exit happened.
+
+        Covers the sell arriving while our entry was still pending (the position
+        did not exist yet, so the sell was not classified as EXIT), a sell lost
+        by the feed and caught up later, or a mirror exit that failed. Only full
+        exits are handled here; partial mirrors stay with the normal EXIT flow.
+        """
+        cfg = self._config()
+        if p.source_wallet_id is None or not cfg.signals.follow_sells:
+            return None
+        if source_sell_fraction(1.0, ExitMode(p.exit_mode), cfg.exits) is None:
+            return None  # SMART without close_on_source_sell: the source's exit is irrelevant
+        async with self.db.session() as s:
+            last = await TransactionRepo(s).last_for_wallet_token(p.source_wallet_id, p.token_mint)
+            entry = await SignalRepo(s).get(p.entry_signal_id) if p.entry_signal_id else None
+        if last is None or last.side != Side.SELL.value:
+            return None
+        if entry is not None and entry.source_block_time and last.block_time < entry.source_block_time:
+            return None  # an old sell, from before the buy we copied
+        if entry is None and last.block_time < p.opened_at:
+            return None
+        before, after = last.token_balance_before, last.token_balance_after
+        if before is None or after is None or before <= 0:
+            return None
+        if (before - after) / before < cfg.exits.mirror_full_exit_threshold:
+            return None
+        seen = last.detected_at or last.block_time
+        if (self.clock.now() - seen).total_seconds() < SOURCE_EXIT_GRACE_SECONDS:
+            return None  # give the regular EXIT signal its chance first
+        return ExitDecision(1.0, "source_exited", "La wallet origen ya había vendido todo (salida no espejada)")
 
     def _check_stale(self, p: Position, now: datetime) -> None:
         ref = p.last_price_at or p.opened_at

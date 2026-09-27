@@ -38,16 +38,15 @@ from copytrader.core.types import (
     Side,
     SignalStatus,
     TradeMode,
-    WalletStatus,
 )
 from copytrader.db.base import Database
-from copytrader.db.repositories import PositionRepo, SignalRepo
+from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo
 from copytrader.execution.base import quote_price_usd
 from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
 from copytrader.risk.engine import EntryRequest, RiskEngine
-from copytrader.signals.engine import SignalContext, SignalEngine
+from copytrader.signals.engine import SignalContext, SignalEngine, copyable
 
 log = structlog.get_logger(__name__)
 
@@ -141,7 +140,7 @@ class CopyPipeline:
 
         # 1. wallet eligibility (fresh state, the selection may have changed since detection)
         info = self.signals.wallet(swap.wallet) or ctx.wallet
-        eligible = info.selected and info.status is WalletStatus.ACTIVE and info.list_type is not ListType.BLACKLIST
+        eligible = copyable(info)
         self._check(
             checks,
             CheckResult(
@@ -540,13 +539,30 @@ class CopyPipeline:
         async with self.db.session() as s:
             sig = await SignalRepo(s).get(ctx.signal_id)
             if sig is not None:
-                sig.status = status.value
+                settled = sig.status in (SignalStatus.EXECUTED.value, SignalStatus.FAILED.value)
+                if not (status is SignalStatus.APPROVED and settled):
+                    # a pending order may already have been resolved by recovery: never downgrade it
+                    sig.status = status.value
+                    sig.reason = reason or ("Copiada" if status is SignalStatus.EXECUTED else sig.reason)
                 sig.decision = decision.to_dict()
-                sig.reason = reason or ("Copiada" if status is SignalStatus.EXECUTED else sig.reason)
                 sig.decided_at = self.clock.now()
                 sig.mode = mode.value if mode else None
                 if token is not None and token.symbol:
                     sig.token_symbol = token.symbol
+            await EventLogRepo(s).add(
+                "pipeline",
+                "decision_approved" if approved else f"decision_{status.value}",
+                level="info" if approved else "warning",
+                trace_id=ctx.trace_id,
+                data={
+                    "signal_id": ctx.signal_id,
+                    "reason": reason,
+                    "size_usd": state["size"],
+                    "mode": mode.value if mode else None,
+                    "failed_check": failed[0].name if failed else None,
+                    "ms": round((time.perf_counter() - started) * 1000, 1),
+                },
+            )
         metrics.PIPELINE_LATENCY.observe(time.perf_counter() - started)
         metrics.DECISIONS.labels(
             result="approved" if approved else status.value, reason=failed[0].name if failed else "ok"

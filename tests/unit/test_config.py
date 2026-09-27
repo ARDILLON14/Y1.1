@@ -99,6 +99,8 @@ async def test_service_blocks_non_runtime_sections():
         await svc.apply_patch({"app": {"operating_level": 5}}, author="me")
     with pytest.raises(ConfigError):
         await svc.apply_patch({"levels": {"live_trading_enabled": True}}, author="me")
+    with pytest.raises(ConfigError):  # the dashboard arm step cannot be disabled at runtime
+        await svc.apply_patch({"levels": {"require_arm": False}}, author="me")
     with pytest.raises(ConfigError):
         await svc.apply_patch({"security": {"signer_mode": "local"}}, author="me")
 

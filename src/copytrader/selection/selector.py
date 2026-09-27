@@ -49,14 +49,16 @@ def select_wallets(candidates: list[Candidate], previous: set[str], cfg: Selecti
             result.reasons[c.address] = "Watchlist: solo alertas"
         elif c.status is WalletStatus.BLOCKED:
             result.reasons[c.address] = "Bloqueada"
+        elif c.status is WalletStatus.OBSERVE:
+            # Observation means "do not copy", also for whitelisted wallets: a manual
+            # list never overrides a risk flag. Incumbents are dropped immediately.
+            tag = " (whitelist)" if c.list_type is ListType.WHITELIST else ""
+            result.reasons[c.address] = f"En observación{tag}: no se copia hasta volver a ACTIVA"
         elif c.list_type is ListType.WHITELIST:
             if c.score >= cfg.whitelist_min_score:
                 eligible.append(c)
             else:
                 result.reasons[c.address] = f"Whitelist pero score {c.score:.1f} < {cfg.whitelist_min_score:.0f}"
-        elif c.status is WalletStatus.OBSERVE:
-            # Incumbents in OBSERVE are dropped immediately: observation means "do not copy".
-            result.reasons[c.address] = "En observación"
         else:
             eligible.append(c)
 
