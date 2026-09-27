@@ -115,6 +115,9 @@ class ProvidersSection(Section):
     token_static_ttl_seconds: float = Field(3600.0, gt=0)
     price_ttl_seconds: float = Field(3.0, gt=0)
     quote_mints: list[str] = Field(default_factory=lambda: [SOL_MINT, USDC_MINT, USDT_MINT])
+    sol_price_history_url: str = "https://data-api.binance.vision/api/v3/klines"
+    sol_price_symbol: str = "SOLUSDT"
+    token_categories_file: str | None = "config/token_categories.yaml"
 
 
 # ----------------------------------------------------------------------- analysis
