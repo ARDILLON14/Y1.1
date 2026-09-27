@@ -134,6 +134,8 @@ class AnalysisSection(Section):
     min_replicable_hold_seconds: float = Field(60.0, ge=0)
     regime_trend_threshold_pct: float = Field(3.0, gt=0)
     regime_high_vol_threshold_pct: float = Field(6.0, gt=0)
+    metrics_snapshot_hours: float = Field(24.0, gt=0, description="new metrics row at most every N hours")
+    score_snapshot_minutes: float = Field(60.0, gt=0, description="new score row at most every N minutes")
 
 
 # ------------------------------------------------------------------------ scoring

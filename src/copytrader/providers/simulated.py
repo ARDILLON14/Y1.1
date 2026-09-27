@@ -341,10 +341,11 @@ class SimulatedMarket:
                 elif arche == "lucky":
                     rate = 2.0
                     hold = timedelta(hours=float(self.rng.uniform(1, 24)))
-                    mult: float | None = float(self.rng.uniform(0.4, 1.05))
+                    mult: float | None = float(self.rng.uniform(0.7, 1.08))
+                    size = float(self.rng.uniform(100, 400))
                     if not lucky_done and t > self.start + (end - self.start) * 0.4:
-                        mult, lucky_done = 40.0, True
-                    ev = self._roundtrip(w, t, end, skill=0.0, hold=hold, size=float(self.rng.uniform(100, 400)),
+                        mult, lucky_done, size = 40.0, True, 800.0
+                    ev = self._roundtrip(w, t, end, skill=0.0, hold=hold, size=size,
                                          source=TxSource.BACKFILL, exit_mult=mult)
                 elif arche == "wash":
                     rate = 30.0

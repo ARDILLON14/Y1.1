@@ -238,6 +238,35 @@ class AnalyticsRepo:
             unrealized_pnl_usd=data.get("unrealized_pnl_usd"), data=data,
         ))
 
+    async def upsert_metrics(self, wallet_id: int, window: str, data: dict[str, Any], computed_at: datetime,
+                             snapshot_hours: float) -> None:
+        """Insert a new snapshot at most every ``snapshot_hours``; otherwise update the latest in place."""
+        latest = await self.latest_metrics(wallet_id, window)
+        if latest is None or (computed_at - latest.computed_at).total_seconds() >= snapshot_hours * 3600:
+            await self.add_metrics(wallet_id, window, data, computed_at)
+            return
+        latest.n_trades = int(data.get("n_closed_trades") or 0)
+        latest.win_rate = data.get("win_rate")
+        latest.profit_factor = _finite(data.get("profit_factor"))
+        latest.roi_pct = data.get("roi_pct")
+        latest.max_drawdown_pct = data.get("max_drawdown_pct")
+        latest.realized_pnl_usd = data.get("realized_pnl_usd")
+        latest.unrealized_pnl_usd = data.get("unrealized_pnl_usd")
+        latest.data = data
+        latest.computed_at = computed_at
+
+    async def add_score_throttled(self, score: WalletScore, min_minutes: float) -> None:
+        """Keep score history compact: only store a new row on meaningful change or after ``min_minutes``."""
+        latest = await self.latest_score(score.wallet_id)
+        if latest is not None and latest.status == score.status and latest.selected == score.selected \
+                and abs(latest.score - score.score) < 0.5 \
+                and (score.computed_at - latest.computed_at).total_seconds() < min_minutes * 60:
+            for attr in ("score", "score_hist", "score_recent", "confidence", "components", "penalties",
+                         "status_reasons", "rank"):
+                setattr(latest, attr, getattr(score, attr))
+            return
+        self.s.add(score)
+
     async def latest_metrics(self, wallet_id: int, window: str = "all") -> WalletMetric | None:
         stmt = (select(WalletMetric).where(WalletMetric.wallet_id == wallet_id, WalletMetric.window == window)
                 .order_by(WalletMetric.computed_at.desc(), WalletMetric.id.desc()).limit(1))
