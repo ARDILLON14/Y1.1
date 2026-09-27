@@ -115,15 +115,10 @@ class WalletCollector:
     # ------------------------------------------------------------------ storage
     async def store_swaps(self, wallet_id: int, swaps: Iterable[SwapEvent]) -> int:
         """Idempotently persist swaps; returns how many were new."""
-        new = 0
-        latest: SwapEvent | None = None
+        swaps = list(swaps)
+        latest = max(swaps, key=lambda sw: (sw.slot, sw.block_time), default=None)
         async with self.db.session() as s:
-            repo = TransactionRepo(s)
-            for swap in swaps:
-                if await repo.insert_swap(wallet_id, swap) is not None:
-                    new += 1
-                if latest is None or (swap.slot, swap.block_time) > (latest.slot, latest.block_time):
-                    latest = swap
+            new = await TransactionRepo(s).insert_swaps(wallet_id, swaps)
             if latest is not None:
                 await WalletRepo(s).touch_activity(wallet_id, latest.block_time, latest.signature, latest.slot)
         return new

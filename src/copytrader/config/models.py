@@ -300,6 +300,7 @@ class RiskSection(Section):
     max_consecutive_losses: int = Field(6, ge=0, description="0 disables")
     max_execution_errors_per_hour: int = Field(5, ge=0, description="0 disables")
     max_data_age_seconds: float = Field(30.0, gt=0)
+    kill_on_reconciliation_mismatch: bool = True
     reserve_sol: float = Field(0.05, ge=HL.HARD_MIN_RESERVE_SOL)
     token_blacklist: list[str] = Field(default_factory=list)
     token_whitelist_only: bool = False
@@ -350,7 +351,7 @@ class TakeProfitLevel(Section):
 
 class ExitsSection(Section):
     default_mode: ExitMode = ExitMode.PROTECTED
-    close_on_source_sell: bool = True
+    close_on_source_sell: bool = False
     mirror_full_exit_threshold: float = Field(0.9, gt=0, le=1)
     stop_loss_pct: float = Field(20.0, gt=0, lt=100)
     take_profit_levels: list[TakeProfitLevel] = Field(

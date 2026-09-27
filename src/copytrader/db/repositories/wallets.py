@@ -22,7 +22,7 @@ from copytrader.db.models import (
     WalletScore,
     WalletTransaction,
 )
-from copytrader.db.repositories._util import insert_ignore
+from copytrader.db.repositories._util import insert_ignore, insert_many_ignore
 
 
 class WalletRepo:
@@ -81,32 +81,14 @@ class TransactionRepo:
 
     async def insert_swap(self, wallet_id: int, ev: SwapEvent) -> int | None:
         """Idempotent insert; returns None if this swap was already stored."""
-        values: dict[str, Any] = {
-            "wallet_id": wallet_id,
-            "signature": ev.signature,
-            "slot": ev.slot,
-            "block_time": ev.block_time,
-            "token_mint": ev.token_mint,
-            "side": ev.side.value,
-            "token_amount": ev.token_amount,
-            "token_decimals": ev.token_decimals,
-            "quote_mint": ev.quote_mint,
-            "quote_amount": ev.quote_amount,
-            "price_quote": ev.price_quote,
-            "price_usd": ev.price_usd,
-            "value_usd": ev.value_usd,
-            "sol_price_usd": ev.sol_price_usd,
-            "fee_sol": ev.fee_sol,
-            "dex": ev.dex,
-            "token_balance_before": ev.token_balance_before,
-            "token_balance_after": ev.token_balance_after,
-            "liquidity_usd_at_trade": ev.liquidity_usd,
-            "source": ev.source.value,
-            "detected_at": ev.detected_at,
-            "detection_latency_ms": ev.detection_latency_ms,
-        }
-        return await insert_ignore(self.s, WalletTransaction, values,
+        return await insert_ignore(self.s, WalletTransaction, swap_values(wallet_id, ev),
                                    ["wallet_id", "signature", "token_mint", "side"])
+
+    async def insert_swaps(self, wallet_id: int, swaps: Iterable[SwapEvent]) -> int:
+        """Bulk idempotent insert; returns the number of new rows."""
+        rows = [swap_values(wallet_id, ev) for ev in swaps]
+        return await insert_many_ignore(self.s, WalletTransaction, rows,
+                                        ["wallet_id", "signature", "token_mint", "side"])
 
     async def swaps_for_wallet(self, wallet_id: int, address: str, *, since: datetime | None = None,
                                until: datetime | None = None) -> list[SwapEvent]:
@@ -147,6 +129,33 @@ class TransactionRepo:
         if since is not None:
             stmt = stmt.where(WalletTransaction.block_time >= since)
         return list((await self.s.execute(stmt)).scalars().all())
+
+
+def swap_values(wallet_id: int, ev: SwapEvent) -> dict[str, Any]:
+    return {
+        "wallet_id": wallet_id,
+        "signature": ev.signature,
+        "slot": ev.slot,
+        "block_time": ev.block_time,
+        "token_mint": ev.token_mint,
+        "side": ev.side.value,
+        "token_amount": ev.token_amount,
+        "token_decimals": ev.token_decimals,
+        "quote_mint": ev.quote_mint,
+        "quote_amount": ev.quote_amount,
+        "price_quote": ev.price_quote,
+        "price_usd": ev.price_usd,
+        "value_usd": ev.value_usd,
+        "sol_price_usd": ev.sol_price_usd,
+        "fee_sol": ev.fee_sol,
+        "dex": ev.dex,
+        "token_balance_before": ev.token_balance_before,
+        "token_balance_after": ev.token_balance_after,
+        "liquidity_usd_at_trade": ev.liquidity_usd,
+        "source": ev.source.value,
+        "detected_at": ev.detected_at,
+        "detection_latency_ms": ev.detection_latency_ms,
+    }
 
 
 def row_to_swap(r: WalletTransaction, address: str) -> SwapEvent:

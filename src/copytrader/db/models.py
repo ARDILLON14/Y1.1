@@ -235,6 +235,7 @@ class Order(Base):
     last_valid_block_height: Mapped[int | None] = mapped_column(Integer)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     trigger: Mapped[str | None] = mapped_column(String(40))
+    context: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
