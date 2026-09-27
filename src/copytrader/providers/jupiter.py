@@ -14,9 +14,17 @@ from copytrader.resilience.http import ResilientHttp
 
 
 class JupiterClient:
-    def __init__(self, http: ResilientHttp, *, quote_url: str, swap_url: str, price_url: str,
-                 api_key: str | None = None, restrict_intermediate_tokens: bool = True,
-                 clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        http: ResilientHttp,
+        *,
+        quote_url: str,
+        swap_url: str,
+        price_url: str,
+        api_key: str | None = None,
+        restrict_intermediate_tokens: bool = True,
+        clock: Clock | None = None,
+    ) -> None:
         self.http = http
         self.quote_url = quote_url
         self.swap_url = swap_url
@@ -29,20 +37,34 @@ class JupiterClient:
         if amount_raw <= 0:
             raise ValueError("amount must be positive")
         params = {
-            "inputMint": input_mint, "outputMint": output_mint, "amount": str(int(amount_raw)),
-            "slippageBps": str(int(slippage_bps)), "swapMode": "ExactIn",
+            "inputMint": input_mint,
+            "outputMint": output_mint,
+            "amount": str(int(amount_raw)),
+            "slippageBps": str(int(slippage_bps)),
+            "swapMode": "ExactIn",
             "restrictIntermediateTokens": "true" if self.restrict else "false",
         }
         data = await self.http.get_json(self.quote_url, params=params, headers=self._headers)
         return parse_quote(data, self.clock)
 
-    async def build_swap(self, quote: Quote, user_public_key: str, *, priority_max_lamports: int,
-                         priority_level: str, jito_tip_lamports: int = 0) -> BuiltTransaction:
+    async def build_swap(
+        self,
+        quote: Quote,
+        user_public_key: str,
+        *,
+        priority_max_lamports: int,
+        priority_level: str,
+        jito_tip_lamports: int = 0,
+    ) -> BuiltTransaction:
         if jito_tip_lamports > 0:
             fee: dict[str, Any] = {"jitoTipLamports": int(jito_tip_lamports)}
         else:
-            fee = {"priorityLevelWithMaxLamports": {"maxLamports": int(priority_max_lamports),
-                                                    "priorityLevel": priority_level}}
+            fee = {
+                "priorityLevelWithMaxLamports": {
+                    "maxLamports": int(priority_max_lamports),
+                    "priorityLevel": priority_level,
+                }
+            }
         body = {
             "quoteResponse": quote.raw,
             "userPublicKey": user_public_key,
@@ -54,22 +76,25 @@ class JupiterClient:
         tx_b64 = (data or {}).get("swapTransaction")
         lvbh = (data or {}).get("lastValidBlockHeight")
         if not tx_b64 or lvbh is None:
-            raise ProviderError("jupiter: swap response without transaction", provider="jupiter",
-                                retryable=False)
-        return BuiltTransaction(tx_bytes=base64.b64decode(tx_b64), last_valid_block_height=int(lvbh),
-                                raw={k: v for k, v in data.items() if k != "swapTransaction"})
+            raise ProviderError("jupiter: swap response without transaction", provider="jupiter", retryable=False)
+        return BuiltTransaction(
+            tx_bytes=base64.b64decode(tx_b64),
+            last_valid_block_height=int(lvbh),
+            raw={k: v for k, v in data.items() if k != "swapTransaction"},
+        )
 
     async def prices_usd(self, mints: Sequence[str]) -> dict[str, float]:
         out: dict[str, float] = {}
         unique = list(dict.fromkeys(mints))
         for i in range(0, len(unique), 50):
-            chunk = unique[i:i + 50]
-            data = await self.http.get_json(self.price_url, params={"ids": ",".join(chunk)},
-                                            headers=self._headers)
+            chunk = unique[i : i + 50]
+            data = await self.http.get_json(self.price_url, params={"ids": ",".join(chunk)}, headers=self._headers)
             for mint, item in (data or {}).items():
                 if not isinstance(item, dict):
                     continue
                 price = item.get("usdPrice", item.get("price"))
+                if price is None:
+                    continue
                 try:
                     value = float(price)
                 except (TypeError, ValueError):

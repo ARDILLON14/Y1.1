@@ -37,9 +37,16 @@ class KlinesSolPriceHistory:
                 return
             start_ms = chunk * _CHUNK * _HOUR_MS
             end_ms = start_ms + _CHUNK * _HOUR_MS - 1
-            data = await self.http.get_json(self.url, params={
-                "symbol": self.symbol, "interval": "1h", "startTime": start_ms, "endTime": end_ms,
-                "limit": _CHUNK})
+            data = await self.http.get_json(
+                self.url,
+                params={
+                    "symbol": self.symbol,
+                    "interval": "1h",
+                    "startTime": start_ms,
+                    "endTime": end_ms,
+                    "limit": _CHUNK,
+                },
+            )
             for row in data or []:
                 try:
                     self._closes[int(row[0]) // _HOUR_MS] = float(row[4])
@@ -69,8 +76,7 @@ class KlinesSolPriceHistory:
 class StaticSeriesSolPriceHistory:
     """In-memory series (simulation, backtests, tests)."""
 
-    def __init__(self, series: list[tuple[datetime, float]] | None = None,
-                 fallback: float | None = None) -> None:
+    def __init__(self, series: list[tuple[datetime, float]] | None = None, fallback: float | None = None) -> None:
         self._times: list[datetime] = []
         self._values: list[float] = []
         self.fallback = fallback

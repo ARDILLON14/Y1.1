@@ -67,15 +67,29 @@ class KillSwitchService:
         return None
 
     def snapshot(self) -> dict[str, Any]:
-        return {scope.value: {**(self._state.get(scope.value) or {}), "active": self.is_active(scope)}
-                for scope in KillSwitchScope}
+        return {
+            scope.value: {**(self._state.get(scope.value) or {}), "active": self.is_active(scope)}
+            for scope in KillSwitchScope
+        }
 
-    async def activate(self, scope: KillSwitchScope, reason: str, *, actor: str = "system",
-                       ip: str | None = None, flatten: bool = False) -> bool:
+    async def activate(
+        self,
+        scope: KillSwitchScope,
+        reason: str,
+        *,
+        actor: str = "system",
+        ip: str | None = None,
+        flatten: bool = False,
+    ) -> bool:
         if self.is_active(scope):
             return False
-        self._state[scope.value] = {"active": True, "reason": reason, "actor": actor,
-                                    "at": self.clock.now().isoformat(), "day": self._today()}
+        self._state[scope.value] = {
+            "active": True,
+            "reason": reason,
+            "actor": actor,
+            "at": self.clock.now().isoformat(),
+            "day": self._today(),
+        }
         await self._persist(actor, f"kill_switch_on:{scope.value}", reason, ip)
         log.critical("kill_switch_activated", scope=scope.value, reason=reason, actor=actor)
         self.bus.publish(KillSwitchChanged(scope=scope, active=True, reason=reason, actor=actor))
@@ -88,8 +102,7 @@ class KillSwitchService:
     async def deactivate(self, scope: KillSwitchScope, *, actor: str, ip: str | None = None) -> bool:
         if not (self._state.get(scope.value) or {}).get("active"):
             return False
-        self._state[scope.value] = {"active": False, "reason": "", "actor": actor,
-                                    "at": self.clock.now().isoformat()}
+        self._state[scope.value] = {"active": False, "reason": "", "actor": actor, "at": self.clock.now().isoformat()}
         await self._persist(actor, f"kill_switch_off:{scope.value}", "manual reset", ip)
         self.bus.publish(KillSwitchChanged(scope=scope, active=False, reason="reset manual", actor=actor))
         return True

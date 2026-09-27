@@ -40,7 +40,7 @@ def test_no_look_ahead_in_selection():
         swaps["late"].append(swap("late", f"L{i}", Side.BUY, t2, 100, 100))
         swaps["late"].append(swap("late", f"L{i}", Side.SELL, t2 + timedelta(hours=1), 100, 150))
     bt = Backtester(lambda: cfg)
-    selected, scores, _ = bt._select(swaps, {}, T0 + timedelta(days=15), 30, {}, set(), 5)  # noqa: SLF001
+    selected, scores, _ = bt._select(swaps, {}, T0 + timedelta(days=15), 30, {}, set(), 5)
     assert "late" not in selected
     assert scores["late"] < 50  # no data before t → neutral/low prior only
     params = BacktestParams(train_days=10, test_days=5)

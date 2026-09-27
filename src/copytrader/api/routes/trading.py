@@ -33,9 +33,14 @@ async def _wallet_map(c: Any) -> dict[int, Any]:
 
 
 @router.get("/signals")
-async def list_signals(request: Request, limit: int = Query(100, ge=1, le=500), status: str | None = None,
-                       action: str | None = None, before: int | None = None,
-                       _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def list_signals(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    status: str | None = None,
+    action: str | None = None,
+    before: int | None = None,
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     c = ctx(request).container
     async with c.db.session() as s:
         rows = await SignalRepo(s).list(limit=limit, status=status, action=action, before_id=before)
@@ -55,38 +60,64 @@ async def signal_detail(signal_id: int, request: Request, _: Session = Depends(s
     data = ser.signal(row, wallets.get(row.wallet_id))
     dec = row.decision or {}
     if dec.get("checks"):
-        decision = Decision(approved=bool(dec.get("approved")), reason=dec.get("reason"), checks=[
-            CheckResult(ch["name"], ch["label"], ch["passed"], ch.get("value"), ch.get("limit"),
-                        ch.get("message", ""), ch.get("critical", True)) for ch in dec["checks"]])
+        decision = Decision(
+            approved=bool(dec.get("approved")),
+            reason=dec.get("reason"),
+            checks=[
+                CheckResult(
+                    ch["name"],
+                    ch["label"],
+                    ch["passed"],
+                    ch.get("value"),
+                    ch.get("limit"),
+                    ch.get("message", ""),
+                    ch.get("critical", True),
+                )
+                for ch in dec["checks"]
+            ],
+        )
         w = wallets.get(row.wallet_id)
-        header = (f"Wallet {w.label or w.address[:6] if w else '?'}\nScore: {row.wallet_score or 0:.0f}\n\n"
-                  f"{row.side.upper()} DETECTED")
+        header = (
+            f"Wallet {w.label or w.address[:6] if w else '?'}\nScore: {row.wallet_score or 0:.0f}\n\n"
+            f"{row.side.upper()} DETECTED"
+        )
         data["explanation"] = decision.explain(header)
-    data["events"] = [{"ts": ser.iso(e.ts), "component": e.component, "event": e.event, "data": e.data}
-                      for e in events]
+    data["events"] = [{"ts": ser.iso(e.ts), "component": e.component, "event": e.event, "data": e.data} for e in events]
     return data
 
 
 @router.get("/trades")
-async def trades(request: Request, mode: Literal["paper", "live"] | None = None,
-                 limit: int = Query(100, ge=1, le=500), before: int | None = None,
-                 _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def trades(
+    request: Request,
+    mode: Literal["paper", "live"] | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    before: int | None = None,
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     async with ctx(request).container.db.session() as s:
         rows = await ExecutionRepo(s).list(limit=limit, mode=mode, before_id=before)
     return [ser.execution(e, o) for e, o in rows]
 
 
 @router.get("/orders")
-async def orders(request: Request, mode: Literal["paper", "live"] | None = None,
-                 limit: int = Query(100, ge=1, le=500), _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def orders(
+    request: Request,
+    mode: Literal["paper", "live"] | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     async with ctx(request).container.db.session() as s:
         return [ser.order(o) for o in await OrderRepo(s).list(limit=limit, mode=mode)]
 
 
 @router.get("/positions")
-async def positions(request: Request, status: str | None = Query(None, pattern="^(open|closed|closing)$"),
-                    mode: Literal["paper", "live"] | None = None, limit: int = Query(200, ge=1, le=1000),
-                    _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def positions(
+    request: Request,
+    status: str | None = Query(None, pattern="^(open|closed|closing)$"),
+    mode: Literal["paper", "live"] | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     c = ctx(request).container
     async with c.db.session() as s:
         rows = await PositionRepo(s).list(status=status, mode=mode, limit=limit)
@@ -99,12 +130,14 @@ class CloseBody(BaseModel):
 
 
 @router.post("/positions/{position_id}/close")
-async def close_position(position_id: int, body: CloseBody, request: Request,
-                         sess: Session = Depends(write_session)) -> dict[str, Any]:
+async def close_position(
+    position_id: int, body: CloseBody, request: Request, sess: Session = Depends(write_session)
+) -> dict[str, Any]:
     c = ctx(request).container
     async with c.db.session() as s:
-        await AuditRepo(s).add(sess.username, "position_close", str(position_id), {"reason": body.reason},
-                               client_ip(request))
+        await AuditRepo(s).add(
+            sess.username, "position_close", str(position_id), {"reason": body.reason}, client_ip(request)
+        )
     result = await c.positions.close_position(position_id, reason=f"{body.reason} ({sess.username})")
     if result is None:
         raise HTTPException(status_code=409, detail="la posición no está abierta o ya se está cerrando")
@@ -122,8 +155,9 @@ class BacktestBody(BaseModel):
 
 
 @router.post("/backtest")
-async def start_backtest(body: BacktestBody, request: Request, sess: Session = Depends(write_session)
-                         ) -> dict[str, Any]:
+async def start_backtest(
+    body: BacktestBody, request: Request, sess: Session = Depends(write_session)
+) -> dict[str, Any]:
     from copytrader.backtest.service import run_backtest
 
     c = ctx(request).container
@@ -133,8 +167,9 @@ async def start_backtest(body: BacktestBody, request: Request, sess: Session = D
     _backtests.add(task)
     task.add_done_callback(_backtests.discard)
     async with c.db.session() as s:
-        await AuditRepo(s).add(sess.username, "backtest_start", None, body.model_dump(exclude_none=True),
-                               client_ip(request))
+        await AuditRepo(s).add(
+            sess.username, "backtest_start", None, body.model_dump(exclude_none=True), client_ip(request)
+        )
     return {"started": True}
 
 

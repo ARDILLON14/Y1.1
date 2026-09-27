@@ -14,6 +14,7 @@ with jumps and rugs, pools are constant-product AMMs.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import heapq
 import math
 from collections.abc import Sequence
@@ -39,8 +40,23 @@ _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 AMM_FEE = 0.0025
 
 ARCHETYPES = (
-    "skilled", "skilled", "skilled", "scalper", "scalper", "random", "random", "random", "lucky",
-    "wash", "sniper", "coordinated", "coordinated", "coordinated", "degrading", "inactive", "low_liquidity",
+    "skilled",
+    "skilled",
+    "skilled",
+    "scalper",
+    "scalper",
+    "random",
+    "random",
+    "random",
+    "lucky",
+    "wash",
+    "sniper",
+    "coordinated",
+    "coordinated",
+    "coordinated",
+    "degrading",
+    "inactive",
+    "low_liquidity",
 )
 
 
@@ -86,9 +102,17 @@ class SimWallet:
 
 
 class SimulatedMarket:
-    def __init__(self, *, clock: Clock, seed: int = 7, n_wallets: int = 40, n_tokens: int = 60,
-                 history_days: int = 60, realtime_trades_per_minute: float = 6.0,
-                 speedup: float = 1.0) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Clock,
+        seed: int = 7,
+        n_wallets: int = 40,
+        n_tokens: int = 60,
+        history_days: int = 60,
+        realtime_trades_per_minute: float = 6.0,
+        speedup: float = 1.0,
+    ) -> None:
         self.clock = clock
         self.rng = np.random.default_rng(seed)
         self.t0 = clock.now()
@@ -146,9 +170,15 @@ class SimulatedMarket:
                 mint = mint[:-4] + "pump"
             risky = self.rng.random()
             tok = SimToken(
-                mint=mint, symbol=f"SIM{i:03d}", created_at=created, init_price=init_price, supply=supply,
-                base_liquidity=base_liq, vol=float(self.rng.uniform(0.004, 0.02)),
-                drift=float(self.rng.normal(0, 0.0004)), rug_at=rug_at,
+                mint=mint,
+                symbol=f"SIM{i:03d}",
+                created_at=created,
+                init_price=init_price,
+                supply=supply,
+                base_liquidity=base_liq,
+                vol=float(self.rng.uniform(0.004, 0.02)),
+                drift=float(self.rng.normal(0, 0.0004)),
+                rug_at=rug_at,
                 category="launchpad:pumpfun" if mint.endswith("pump") else ("cap:micro" if micro else "cap:mid"),
                 risk_score=float(self.rng.uniform(55, 95) if rug_at or risky < 0.1 else self.rng.uniform(5, 45)),
                 mint_authority=self._address() if risky < 0.06 else None,
@@ -253,8 +283,17 @@ class SimulatedMarket:
             out.append(tok)
         return out
 
-    def _swap(self, wallet: str, tok: SimToken, side: Side, t: datetime, usd: float, price: float,
-              source: TxSource, qty: float | None = None) -> SwapEvent:
+    def _swap(
+        self,
+        wallet: str,
+        tok: SimToken,
+        side: Side,
+        t: datetime,
+        usd: float,
+        price: float,
+        source: TxSource,
+        qty: float | None = None,
+    ) -> SwapEvent:
         sol = self.sol_price(t)
         qty = qty if qty is not None else usd / price
         key = (wallet, tok.mint)
@@ -262,18 +301,43 @@ class SimulatedMarket:
         after = before + qty if side is Side.BUY else max(0.0, before - qty)
         self._holdings[key] = after
         return SwapEvent(
-            wallet=wallet, signature=self._signature(), slot=self._slot(t), block_time=t,
-            token_mint=tok.mint, side=side, token_amount=qty, token_decimals=tok.decimals,
-            quote_mint=SOL_MINT, quote_amount=usd / sol, price_quote=(usd / sol) / qty, price_usd=usd / qty,
-            value_usd=usd, sol_price_usd=sol, fee_sol=0.000105, dex="pumpswap" if tok.mint.endswith("pump")
-            else "raydium_amm", token_balance_before=before, token_balance_after=after, source=source,
+            wallet=wallet,
+            signature=self._signature(),
+            slot=self._slot(t),
+            block_time=t,
+            token_mint=tok.mint,
+            side=side,
+            token_amount=qty,
+            token_decimals=tok.decimals,
+            quote_mint=SOL_MINT,
+            quote_amount=usd / sol,
+            price_quote=(usd / sol) / qty,
+            price_usd=usd / qty,
+            value_usd=usd,
+            sol_price_usd=sol,
+            fee_sol=0.000105,
+            dex="pumpswap" if tok.mint.endswith("pump") else "raydium_amm",
+            token_balance_before=before,
+            token_balance_after=after,
+            source=source,
             liquidity_usd=self.liquidity(tok.mint, t),
         )
 
-    def _roundtrip(self, w: SimWallet, t: datetime, end: datetime, *, skill: float,
-                   hold: timedelta, size: float, source: TxSource, forced: SimToken | None = None,
-                   low_liq: bool | None = False, young: bool = False, exit_mult: float | None = None
-                   ) -> list[SwapEvent]:
+    def _roundtrip(
+        self,
+        w: SimWallet,
+        t: datetime,
+        end: datetime,
+        *,
+        skill: float,
+        hold: timedelta,
+        size: float,
+        source: TxSource,
+        forced: SimToken | None = None,
+        low_liq: bool | None = False,
+        young: bool = False,
+        exit_mult: float | None = None,
+    ) -> list[SwapEvent]:
         candidates = [forced] if forced else self._alive_tokens(t, low_liq=low_liq, young=young)
         if not candidates:
             return []
@@ -285,6 +349,7 @@ class SimulatedMarket:
                 a = self.token_price(tk.mint, t)
                 b = self.token_price(tk.mint, min(t + hold, self.t0)) if t + hold <= self.t0 else a
                 return (b / a) if a and b else 0.0
+
             tok = max(picks, key=fwd)
         entry_px = self.token_price(tok.mint, t)
         if not entry_px:
@@ -303,10 +368,12 @@ class SimulatedMarket:
         if self.rng.random() < 0.3:  # partial exits
             t_mid = t + hold / 2
             mid_px = (self.token_price(tok.mint, t_mid) or exit_px) * 0.995
-            events.append(self._swap(w.address, tok, Side.SELL, t_mid, qty * 0.5 * mid_px, mid_px, source,
-                                     qty=qty * 0.5))
-            events.append(self._swap(w.address, tok, Side.SELL, t_exit, qty * 0.5 * exit_px, exit_px, source,
-                                     qty=qty * 0.5))
+            events.append(
+                self._swap(w.address, tok, Side.SELL, t_mid, qty * 0.5 * mid_px, mid_px, source, qty=qty * 0.5)
+            )
+            events.append(
+                self._swap(w.address, tok, Side.SELL, t_exit, qty * 0.5 * exit_px, exit_px, source, qty=qty * 0.5)
+            )
         else:
             events.append(self._swap(w.address, tok, Side.SELL, t_exit, qty * exit_px, exit_px, source, qty=qty))
         return events
@@ -329,41 +396,80 @@ class SimulatedMarket:
                 elif arche == "scalper":
                     rate = 10.0
                     hold = timedelta(minutes=float(self.rng.uniform(15, 90)))
-                    ev = self._roundtrip(w, t, end, skill=0.6, hold=hold, size=float(self.rng.uniform(100, 600)),
-                                         source=TxSource.BACKFILL)
+                    ev = self._roundtrip(
+                        w,
+                        t,
+                        end,
+                        skill=0.6,
+                        hold=hold,
+                        size=float(self.rng.uniform(100, 600)),
+                        source=TxSource.BACKFILL,
+                    )
                 elif arche == "degrading":
                     rate = 4.0
                     skill = 0.8 if t < split else 0.0
                     hold = timedelta(hours=float(self.rng.uniform(1, 10)))
                     mult = None if t < split else float(self.rng.uniform(0.55, 1.02))
-                    ev = self._roundtrip(w, t, end, skill=skill, hold=hold, size=float(self.rng.uniform(200, 1500)),
-                                         source=TxSource.BACKFILL, exit_mult=mult)
+                    ev = self._roundtrip(
+                        w,
+                        t,
+                        end,
+                        skill=skill,
+                        hold=hold,
+                        size=float(self.rng.uniform(200, 1500)),
+                        source=TxSource.BACKFILL,
+                        exit_mult=mult,
+                    )
                 elif arche == "lucky":
                     rate = 2.0
                     hold = timedelta(hours=float(self.rng.uniform(1, 24)))
-                    mult: float | None = float(self.rng.uniform(0.7, 1.08))
+                    lucky_mult = float(self.rng.uniform(0.7, 1.08))
                     size = float(self.rng.uniform(100, 400))
                     if not lucky_done and t > self.start + (end - self.start) * 0.4:
-                        mult, lucky_done, size = 40.0, True, 800.0
-                    ev = self._roundtrip(w, t, end, skill=0.0, hold=hold, size=size,
-                                         source=TxSource.BACKFILL, exit_mult=mult)
+                        lucky_mult, lucky_done, size = 40.0, True, 800.0
+                    ev = self._roundtrip(
+                        w, t, end, skill=0.0, hold=hold, size=size, source=TxSource.BACKFILL, exit_mult=lucky_mult
+                    )
                 elif arche == "wash":
                     rate = 30.0
                     hold = timedelta(seconds=float(self.rng.uniform(20, 120)))
-                    ev = self._roundtrip(w, t, end, skill=0.0, hold=hold, size=float(self.rng.uniform(500, 3000)),
-                                         source=TxSource.BACKFILL, exit_mult=float(self.rng.uniform(0.997, 1.003)))
+                    ev = self._roundtrip(
+                        w,
+                        t,
+                        end,
+                        skill=0.0,
+                        hold=hold,
+                        size=float(self.rng.uniform(500, 3000)),
+                        source=TxSource.BACKFILL,
+                        exit_mult=float(self.rng.uniform(0.997, 1.003)),
+                    )
                 elif arche == "sniper":
                     break  # snipers act on launches, not on a Poisson clock: see _snipes()
                 elif arche == "low_liquidity":
                     rate = 5.0
                     hold = timedelta(hours=float(self.rng.uniform(0.5, 6)))
-                    ev = self._roundtrip(w, t, end, skill=0.5, hold=hold, size=float(self.rng.uniform(100, 600)),
-                                         source=TxSource.BACKFILL, low_liq=True)
+                    ev = self._roundtrip(
+                        w,
+                        t,
+                        end,
+                        skill=0.5,
+                        hold=hold,
+                        size=float(self.rng.uniform(100, 600)),
+                        source=TxSource.BACKFILL,
+                        low_liq=True,
+                    )
                 else:  # random
                     rate = 5.0
                     hold = timedelta(hours=float(self.rng.uniform(0.2, 12)))
-                    ev = self._roundtrip(w, t, end, skill=0.0, hold=hold, size=float(self.rng.uniform(100, 1000)),
-                                         source=TxSource.BACKFILL)
+                    ev = self._roundtrip(
+                        w,
+                        t,
+                        end,
+                        skill=0.0,
+                        hold=hold,
+                        size=float(self.rng.uniform(100, 1000)),
+                        source=TxSource.BACKFILL,
+                    )
                 out.extend(ev)
                 t += timedelta(days=float(self.rng.exponential(1.0 / rate)))
             if arche == "sniper":
@@ -375,18 +481,28 @@ class SimulatedMarket:
 
     def _snipes(self, w: SimWallet, end: datetime) -> list[SwapEvent]:
         out: list[SwapEvent] = []
-        launches = sorted((t for t in self.tokens.values() if self.start <= t.created_at < end),
-                          key=lambda t: t.created_at)
+        launches = sorted(
+            (t for t in self.tokens.values() if self.start <= t.created_at < end), key=lambda t: t.created_at
+        )
         for tok in launches:
             for _ in range(2):
                 if self.rng.random() > 0.8:
                     continue
                 t_entry = tok.created_at + timedelta(seconds=float(self.rng.uniform(1, 15)))
                 mult = float(self.rng.uniform(1.2, 3.0)) if self.rng.random() < 0.8 else 0.5
-                out.extend(self._roundtrip(w, t_entry, end, skill=0.0,
-                                           hold=timedelta(seconds=float(self.rng.uniform(15, 55))),
-                                           size=float(self.rng.uniform(200, 800)), source=TxSource.BACKFILL,
-                                           forced=tok, exit_mult=mult))
+                out.extend(
+                    self._roundtrip(
+                        w,
+                        t_entry,
+                        end,
+                        skill=0.0,
+                        hold=timedelta(seconds=float(self.rng.uniform(15, 55))),
+                        size=float(self.rng.uniform(200, 800)),
+                        source=TxSource.BACKFILL,
+                        forced=tok,
+                        exit_mult=mult,
+                    )
+                )
         return out
 
     def _coordinate_groups(self) -> None:
@@ -408,8 +524,18 @@ class SimulatedMarket:
                     px = ev.price_usd * (1.003 if ev.side is Side.BUY else 0.997) if ev.price_usd else 0.0
                     if px <= 0:
                         continue
-                    copied.append(self._swap(f.address, tok, ev.side, t, (ev.value_usd or 0) * 0.8, px,
-                                             TxSource.BACKFILL, qty=ev.token_amount * 0.8))
+                    copied.append(
+                        self._swap(
+                            f.address,
+                            tok,
+                            ev.side,
+                            t,
+                            (ev.value_usd or 0) * 0.8,
+                            px,
+                            TxSource.BACKFILL,
+                            qty=ev.token_amount * 0.8,
+                        )
+                    )
                 self.history[f.address] = copied
 
     # ------------------------------------------------------------- realtime
@@ -422,12 +548,13 @@ class SimulatedMarket:
         w = eligible[int(self.rng.integers(len(eligible)))]
         hold = timedelta(minutes=float(self.rng.uniform(2, 15)) / self.speedup)
         size = float(self.rng.uniform(150, 1200))
-        cands = self._alive_tokens(now, low_liq=True if w.archetype == "low_liquidity" else False)
+        cands = self._alive_tokens(now, low_liq=w.archetype == "low_liquidity")
         if not cands:
             return out
         tok = cands[int(self.rng.integers(len(cands)))]
         skilled = w.archetype in ("skilled", "scalper", "coordinated") or (
-            w.archetype == "degrading" and self.rng.random() < 0.2)
+            w.archetype == "degrading" and self.rng.random() < 0.2
+        )
         if skilled and self.rng.random() < 0.7:
             # the skilled wallet "knows": inject a positive drift for the hold period
             tok.biases.append((now + hold, float(self.rng.uniform(0.0015, 0.004))))
@@ -440,10 +567,24 @@ class SimulatedMarket:
         out.append(buy)
         exit_t = now + hold
         # SELL is materialised later (price at exit time unknown yet): marker event.
-        out.append(SwapEvent(
-            wallet=w.address, signature="pending", slot=0, block_time=exit_t, token_mint=tok.mint,
-            side=Side.SELL, token_amount=buy.token_amount, token_decimals=tok.decimals, quote_mint=SOL_MINT,
-            quote_amount=0.0, price_quote=0.0, price_usd=None, value_usd=None, source=TxSource.SIMULATED))
+        out.append(
+            SwapEvent(
+                wallet=w.address,
+                signature="pending",
+                slot=0,
+                block_time=exit_t,
+                token_mint=tok.mint,
+                side=Side.SELL,
+                token_amount=buy.token_amount,
+                token_decimals=tok.decimals,
+                quote_mint=SOL_MINT,
+                quote_amount=0.0,
+                price_quote=0.0,
+                price_usd=None,
+                value_usd=None,
+                source=TxSource.SIMULATED,
+            )
+        )
         return out
 
     def materialize_sell(self, marker: SwapEvent) -> SwapEvent | None:
@@ -452,8 +593,16 @@ class SimulatedMarket:
         if not price:
             return None
         px = price * 0.996
-        return self._swap(marker.wallet, tok, Side.SELL, marker.block_time, marker.token_amount * px, px,
-                          TxSource.SIMULATED, qty=marker.token_amount)
+        return self._swap(
+            marker.wallet,
+            tok,
+            Side.SELL,
+            marker.block_time,
+            marker.token_amount * px,
+            px,
+            TxSource.SIMULATED,
+            qty=marker.token_amount,
+        )
 
     # --------------------------------------------------------------- quotes
     def quote(self, input_mint: str, output_mint: str, amount_raw: int) -> tuple[int, float]:
@@ -470,12 +619,12 @@ class SimulatedMarket:
             eff_usd = usd_in * (1 - AMM_FEE)
             tokens_out = (res_usd / price) * eff_usd / (res_usd + eff_usd)
             impact = 1 - (tokens_out * price) / usd_in
-            return int(tokens_out * 10 ** tok.decimals), max(0.0, impact)
+            return int(tokens_out * 10**tok.decimals), max(0.0, impact)
         tok = self.tokens.get(input_mint)
         price, liq = self.token_price(input_mint, now), self.liquidity(input_mint, now)
         if tok is None or not price or not liq:
             raise ProviderError("sim: no route", provider="sim_quotes", retryable=False)
-        qty = amount_raw / 10 ** tok.decimals
+        qty = amount_raw / 10**tok.decimals
         res_tok = (liq / 2) / price
         eff = qty * (1 - AMM_FEE)
         usd_out = (liq / 2) * eff / (res_tok + eff)
@@ -488,16 +637,22 @@ class SimulatedHistorySource:
     def __init__(self, market: SimulatedMarket) -> None:
         self.m = market
 
-    async def fetch_swaps(self, wallet: str, *, since: datetime | None = None,
-                          until_signature: str | None = None, max_signatures: int = 1000,
-                          source: TxSource = TxSource.BACKFILL) -> list[SwapEvent]:
+    async def fetch_swaps(
+        self,
+        wallet: str,
+        *,
+        since: datetime | None = None,
+        until_signature: str | None = None,
+        max_signatures: int = 1000,
+        source: TxSource = TxSource.BACKFILL,
+    ) -> list[SwapEvent]:
         swaps = self.m.history.get(wallet, [])
         if since is not None:
             swaps = [s for s in swaps if s.block_time >= since]
         if until_signature:
             sigs = [s.signature for s in swaps]
             if until_signature in sigs:
-                swaps = swaps[sigs.index(until_signature) + 1:]
+                swaps = swaps[sigs.index(until_signature) + 1 :]
         return swaps[-max_signatures:]
 
 
@@ -527,7 +682,7 @@ class SimulatedFeed:
                     self._seq += 1
                     heapq.heappush(self._pending, (ev.block_time, self._seq, ev))
             while self._pending and self._pending[0][0] <= now:
-                due, seq, ev = heapq.heappop(self._pending)
+                _, seq, ev = heapq.heappop(self._pending)
                 if ev.signature == "pending":  # sell whose price is only known at exit time
                     real = self.m.materialize_sell(ev)
                     if real is None:
@@ -537,16 +692,14 @@ class SimulatedFeed:
                     # emulate network/indexing latency: deliver it once "detected"
                     lat = float(self.m.rng.uniform(*self._latency))
                     ev = _with(ev, detected_at=ev.block_time + timedelta(seconds=lat))
-                    heapq.heappush(self._pending, (ev.detected_at, seq, ev))
+                    heapq.heappush(self._pending, (ev.detected_at or ev.block_time, seq, ev))
                     continue
                 if ev.wallet not in self._wallets:
                     continue
                 self.m.history.setdefault(ev.wallet, []).append(ev)
                 await on_swap(ev)
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stopped.wait(), timeout=0.25)
-            except TimeoutError:
-                pass
 
 
 def _with(ev: SwapEvent, **changes: Any) -> SwapEvent:
@@ -568,17 +721,29 @@ class SimulatedMarketData:
             if tok is None or price is None:
                 continue
             changes: dict[str, float] = {}
-            for key, delta in (("m5", timedelta(minutes=5)), ("h1", timedelta(hours=1)),
-                               ("h6", timedelta(hours=6)), ("h24", timedelta(hours=24))):
+            for key, delta in (
+                ("m5", timedelta(minutes=5)),
+                ("h1", timedelta(hours=1)),
+                ("h6", timedelta(hours=6)),
+                ("h24", timedelta(hours=24)),
+            ):
                 past = self.m.token_price(mint, now - delta)
                 if past:
                     changes[key] = (price / past - 1) * 100
             out[mint] = MarketData(
-                mint=mint, symbol=tok.symbol, name=f"Simulated {tok.symbol}", price_usd=price,
-                liquidity_usd=self.m.liquidity(mint, now), market_cap_usd=price * tok.supply,
-                fdv_usd=price * tok.supply, volume_24h_usd=(self.m.liquidity(mint, now) or 0) * 3,
-                pair_created_at=tok.created_at, price_change_pct=changes,
-                dex="pumpswap" if mint.endswith("pump") else "raydium", pair_address=None)
+                mint=mint,
+                symbol=tok.symbol,
+                name=f"Simulated {tok.symbol}",
+                price_usd=price,
+                liquidity_usd=self.m.liquidity(mint, now),
+                market_cap_usd=price * tok.supply,
+                fdv_usd=price * tok.supply,
+                volume_24h_usd=(self.m.liquidity(mint, now) or 0) * 3,
+                pair_created_at=tok.created_at,
+                price_change_pct=changes,
+                dex="pumpswap" if mint.endswith("pump") else "raydium",
+                pair_address=None,
+            )
         return out
 
 
@@ -593,8 +758,9 @@ class SimulatedTokenRisk:
         rugged = tok.rug_at is not None and tok.rug_at <= self.m.clock.now()
         score = 100.0 if rugged else tok.risk_score
         level = "critical" if rugged else ("high" if score >= 60 else "medium" if score >= 30 else "low")
-        return RiskData(mint=mint, score=score, level=level, flags=["danger:Rugged"] if rugged else [],
-                        is_rugged=rugged)
+        return RiskData(
+            mint=mint, score=score, level=level, flags=["danger:Rugged"] if rugged else [], is_rugged=rugged
+        )
 
 
 class SimulatedMintInfo:
@@ -605,10 +771,14 @@ class SimulatedMintInfo:
         tok = self.m.tokens.get(mint)
         if tok is None:
             return None
-        return MintData(mint=mint, decimals=tok.decimals,
-                        token_program=TOKEN_2022_PROGRAM if tok.dangerous else TOKEN_PROGRAM,
-                        mint_authority=tok.mint_authority, freeze_authority=tok.freeze_authority,
-                        dangerous_extensions=list(tok.dangerous))
+        return MintData(
+            mint=mint,
+            decimals=tok.decimals,
+            token_program=TOKEN_2022_PROGRAM if tok.dangerous else TOKEN_PROGRAM,
+            mint_authority=tok.mint_authority,
+            freeze_authority=tok.freeze_authority,
+            dangerous_extensions=list(tok.dangerous),
+        )
 
 
 class SimulatedPrices:
@@ -652,7 +822,15 @@ class SimulatedQuotes:
         out_raw, impact = self.m.quote(input_mint, output_mint, amount_raw)
         if out_raw <= 0:
             raise ProviderError("sim: zero output", provider="sim_quotes", retryable=False)
-        return Quote(input_mint=input_mint, output_mint=output_mint, in_amount_raw=amount_raw,
-                     out_amount_raw=out_raw, min_out_amount_raw=int(out_raw * (1 - slippage_bps / 10_000)),
-                     slippage_bps=slippage_bps, price_impact_frac=impact, obtained_at=self.m.clock.now(),
-                     route_label="SimAMM", raw={"sim": True})
+        return Quote(
+            input_mint=input_mint,
+            output_mint=output_mint,
+            in_amount_raw=amount_raw,
+            out_amount_raw=out_raw,
+            min_out_amount_raw=int(out_raw * (1 - slippage_bps / 10_000)),
+            slippage_bps=slippage_bps,
+            price_impact_frac=impact,
+            obtained_at=self.m.clock.now(),
+            route_label="SimAMM",
+            raw={"sim": True},
+        )

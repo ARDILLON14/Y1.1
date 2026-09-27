@@ -26,12 +26,11 @@ def hash_password(password: str) -> str:
     if len(password) < MIN_PASSWORD_LEN:
         raise SecurityError(f"la contraseña debe tener al menos {MIN_PASSWORD_LEN} caracteres")
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
-                            dklen=32, maxmem=128 * 1024 * 1024)
-    return "scrypt${}${}${}${}${}".format(
-        _SCRYPT_N, _SCRYPT_R, _SCRYPT_P,
-        base64.b64encode(salt).decode(), base64.b64encode(digest).decode(),
+    digest = hashlib.scrypt(
+        password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32, maxmem=128 * 1024 * 1024
     )
+    salt_b64, digest_b64 = base64.b64encode(salt).decode(), base64.b64encode(digest).decode()
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt_b64}${digest_b64}"
 
 
 def verify_password(password: str, stored: str) -> bool:
@@ -39,8 +38,15 @@ def verify_password(password: str, stored: str) -> bool:
         algo, n, r, p, salt_b64, digest_b64 = stored.split("$")
         if algo != "scrypt":
             return False
-        digest = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt_b64), n=int(n), r=int(r),
-                                p=int(p), dklen=32, maxmem=128 * 1024 * 1024)
+        digest = hashlib.scrypt(
+            password.encode(),
+            salt=base64.b64decode(salt_b64),
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=32,
+            maxmem=128 * 1024 * 1024,
+        )
         return hmac.compare_digest(digest, base64.b64decode(digest_b64))
     except (ValueError, TypeError):
         return False
@@ -57,15 +63,14 @@ def totp_code(secret_b32: str, at: float | None = None, step: int = 30, digits: 
     counter = int((at if at is not None else time.time()) // step)
     mac = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     offset = mac[-1] & 0x0F
-    code = (struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF) % (10**digits)
+    code = (struct.unpack(">I", mac[offset : offset + 4])[0] & 0x7FFFFFFF) % (10**digits)
     return str(code).zfill(digits)
 
 
 def verify_totp(secret_b32: str, code: str, at: float | None = None, window: int = 1) -> bool:
     now = at if at is not None else time.time()
     code = code.strip().replace(" ", "")
-    return any(hmac.compare_digest(totp_code(secret_b32, now + i * 30), code)
-               for i in range(-window, window + 1))
+    return any(hmac.compare_digest(totp_code(secret_b32, now + i * 30), code) for i in range(-window, window + 1))
 
 
 def totp_uri(secret_b32: str, account: str, issuer: str = "copytrader") -> str:

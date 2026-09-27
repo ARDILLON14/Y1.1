@@ -92,8 +92,9 @@ class CircuitBreaker:
                 raise CircuitOpenError(self.name)
             self._half_open_in_flight = True
 
-    async def call(self, fn: Callable[[], Awaitable[T]],
-                   counts_as_failure: Callable[[BaseException], bool] | None = None) -> T:
+    async def call(
+        self, fn: Callable[[], Awaitable[T]], counts_as_failure: Callable[[BaseException], bool] | None = None
+    ) -> T:
         self._before_call()
         try:
             result = await fn()

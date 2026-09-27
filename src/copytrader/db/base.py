@@ -11,7 +11,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import JSON, DateTime, String, event
 from sqlalchemy.dialects.postgresql import JSONB
@@ -56,7 +56,7 @@ class RawAmount(TypeDecorator[int]):
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {
+    type_annotation_map: ClassVar[dict[Any, Any]] = {
         datetime: UTCDateTime(),
         dict[str, Any]: JSONType,
         list[Any]: JSONType,

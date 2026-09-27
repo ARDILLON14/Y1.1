@@ -69,15 +69,21 @@ class ReconnectingStream:
 
     name = "ws"
 
-    def __init__(self, settings: StreamSettings, *, on_status: StatusListener | None = None,
-                 on_reconnect: Callable[[], Awaitable[None]] | None = None,
-                 connect: Callable[..., Any] = websockets.connect) -> None:
+    def __init__(
+        self,
+        settings: StreamSettings,
+        *,
+        on_status: StatusListener | None = None,
+        on_reconnect: Callable[[], Awaitable[None]] | None = None,
+        connect: Callable[..., Any] = websockets.connect,
+    ) -> None:
         self.settings = settings
         self._on_status = on_status
         self._on_reconnect = on_reconnect
         self._connect = connect
         self._stopped = asyncio.Event()
         self._ids = itertools.count(1)
+        self._bg: set[asyncio.Future[None]] = set()
         self.connected = False
 
     async def stop(self) -> None:
@@ -96,9 +102,12 @@ class ReconnectingStream:
         while not self._stopped.is_set():
             try:
                 async with self._connect(
-                    self.settings.url, ping_interval=self.settings.ping_interval,
-                    ping_timeout=self.settings.ping_interval, max_size=16 * 1024 * 1024,
-                    open_timeout=15, close_timeout=5,
+                    self.settings.url,
+                    ping_interval=self.settings.ping_interval,
+                    ping_timeout=self.settings.ping_interval,
+                    max_size=16 * 1024 * 1024,
+                    open_timeout=15,
+                    close_timeout=5,
                 ) as ws:
                     await self._on_open(ws, conn)
                     self._status(True)
@@ -106,13 +115,14 @@ class ReconnectingStream:
                     if not first:
                         metrics.WS_RECONNECTS.labels(stream=self.name).inc()
                         if self._on_reconnect:
-                            asyncio.get_running_loop().create_task(self._on_reconnect())
+                            task = asyncio.ensure_future(self._on_reconnect())
+                            self._bg.add(task)
+                            task.add_done_callback(self._bg.discard)
                     first = False
                     await self._pump(ws, conn, sink)
             except asyncio.CancelledError:
                 raise
-            except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake, InvalidURI,
-                    json.JSONDecodeError) as exc:
+            except (ConnectionClosed, OSError, TimeoutError, InvalidHandshake, InvalidURI, json.JSONDecodeError) as exc:
                 self._status(False, f"{type(exc).__name__}: {exc}"[:200])
                 log.warning("ws_disconnected", stream=self.name, conn=conn.index, error=type(exc).__name__)
             except Exception as exc:  # unexpected: log and keep reconnecting
@@ -134,9 +144,11 @@ class ReconnectingStream:
             while not self._stopped.is_set():
                 recv_task = recv_task or asyncio.ensure_future(ws.recv())
                 cmd_task = cmd_task or asyncio.ensure_future(conn.commands.get())
-                done, _ = await asyncio.wait({recv_task, cmd_task, stop_task},
-                                             timeout=self.settings.stale_timeout,
-                                             return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(
+                    {recv_task, cmd_task, stop_task},
+                    timeout=self.settings.stale_timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
                 if not done:
                     raise TimeoutError("stream stale: no messages")
                 if stop_task in done:
@@ -183,21 +195,20 @@ class LogsSubscribeStream(ReconnectingStream):
                 conn.wallets.discard(wallet)
                 conn.commands.put_nowait(("unsub", wallet))
         for wallet in sorted(wallets - current):
-            conn = next((c for c in self._conns
-                         if len(c.wallets) < self.settings.max_subscriptions_per_connection), None)
-            if conn is None:
-                conn = _Connection(index=len(self._conns))
-                self._conns.append(conn)
+            free = next(
+                (c for c in self._conns if len(c.wallets) < self.settings.max_subscriptions_per_connection), None
+            )
+            if free is None:
+                free = _Connection(index=len(self._conns))
+                self._conns.append(free)
                 if self._sink is not None:
-                    self._tasks.append(asyncio.get_running_loop().create_task(
-                        self._connection_loop(conn, self._sink)))
-            conn.wallets.add(wallet)
-            conn.commands.put_nowait(("sub", wallet))
+                    self._tasks.append(asyncio.get_running_loop().create_task(self._connection_loop(free, self._sink)))
+            free.wallets.add(wallet)
+            free.commands.put_nowait(("sub", wallet))
 
     async def run(self, sink: NoticeSink) -> None:
         self._sink = sink
-        self._tasks = [asyncio.get_running_loop().create_task(self._connection_loop(c, sink))
-                       for c in self._conns]
+        self._tasks = [asyncio.get_running_loop().create_task(self._connection_loop(c, sink)) for c in self._conns]
         await self._stopped.wait()
         for t in self._tasks:
             t.cancel()
@@ -206,9 +217,16 @@ class LogsSubscribeStream(ReconnectingStream):
     async def _send_sub(self, ws: Any, conn: _Connection, wallet: str) -> None:
         req = next(self._ids)
         self._pending[req] = ("sub", wallet)
-        await ws.send(json.dumps({"jsonrpc": "2.0", "id": req, "method": "logsSubscribe",
-                                  "params": [{"mentions": [wallet]},
-                                             {"commitment": self.settings.commitment}]}))
+        await ws.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req,
+                    "method": "logsSubscribe",
+                    "params": [{"mentions": [wallet]}, {"commitment": self.settings.commitment}],
+                }
+            )
+        )
 
     async def _on_open(self, ws: Any, conn: _Connection) -> None:
         self._subs[conn.index] = {}
@@ -226,8 +244,11 @@ class LogsSubscribeStream(ReconnectingStream):
             sub_id = self._subs.get(conn.index, {}).pop(wallet, None)
             if sub_id is not None:
                 self._by_sub.get(conn.index, {}).pop(sub_id, None)
-                await ws.send(json.dumps({"jsonrpc": "2.0", "id": next(self._ids),
-                                          "method": "logsUnsubscribe", "params": [sub_id]}))
+                await ws.send(
+                    json.dumps(
+                        {"jsonrpc": "2.0", "id": next(self._ids), "method": "logsUnsubscribe", "params": [sub_id]}
+                    )
+                )
 
     async def _on_message(self, msg: dict[str, Any], conn: _Connection, sink: NoticeSink) -> None:
         if "id" in msg and msg.get("id") in self._pending:
@@ -242,14 +263,20 @@ class LogsSubscribeStream(ReconnectingStream):
         if msg.get("method") != "logsNotification":
             return
         params = msg.get("params") or {}
-        wallet = self._by_sub.get(conn.index, {}).get(params.get("subscription"))
+        sub_id = params.get("subscription")
+        notified = self._by_sub.get(conn.index, {}).get(sub_id) if isinstance(sub_id, int) else None
         result = params.get("result") or {}
         value = result.get("value") or {}
         if value.get("err") is not None or not value.get("signature"):
             return
-        await sink(StreamNotice(signature=value["signature"],
-                                slot=int((result.get("context") or {}).get("slot") or 0),
-                                received_at=utcnow(), wallet=wallet))
+        await sink(
+            StreamNotice(
+                signature=value["signature"],
+                slot=int((result.get("context") or {}).get("slot") or 0),
+                received_at=utcnow(),
+                wallet=notified,
+            )
+        )
 
 
 class HeliusTransactionStream(ReconnectingStream):
@@ -277,13 +304,25 @@ class HeliusTransactionStream(ReconnectingStream):
             return
         req = next(self._ids)
         self._pending[req] = "sub"
-        await ws.send(json.dumps({
-            "jsonrpc": "2.0", "id": req, "method": "transactionSubscribe",
-            "params": [
-                {"accountInclude": sorted(self._conn.wallets), "failed": False, "vote": False},
-                {"commitment": self.settings.commitment, "encoding": "jsonParsed",
-                 "transactionDetails": "full", "showRewards": False, "maxSupportedTransactionVersion": 0},
-            ]}))
+        await ws.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req,
+                    "method": "transactionSubscribe",
+                    "params": [
+                        {"accountInclude": sorted(self._conn.wallets), "failed": False, "vote": False},
+                        {
+                            "commitment": self.settings.commitment,
+                            "encoding": "jsonParsed",
+                            "transactionDetails": "full",
+                            "showRewards": False,
+                            "maxSupportedTransactionVersion": 0,
+                        },
+                    ],
+                }
+            )
+        )
 
     async def _on_open(self, ws: Any, conn: _Connection) -> None:
         self._sub_id = None
@@ -295,8 +334,11 @@ class HeliusTransactionStream(ReconnectingStream):
         old = self._sub_id
         await self._subscribe(ws)  # subscribe new set first, then drop the old one (no gap)
         if old is not None:
-            await ws.send(json.dumps({"jsonrpc": "2.0", "id": next(self._ids),
-                                      "method": "transactionUnsubscribe", "params": [old]}))
+            await ws.send(
+                json.dumps(
+                    {"jsonrpc": "2.0", "id": next(self._ids), "method": "transactionUnsubscribe", "params": [old]}
+                )
+            )
 
     async def _on_message(self, msg: dict[str, Any], conn: _Connection, sink: NoticeSink) -> None:
         if "id" in msg and msg.get("id") in self._pending:
@@ -312,5 +354,8 @@ class HeliusTransactionStream(ReconnectingStream):
         signature = result.get("signature")
         if not signature:
             return
-        await sink(StreamNotice(signature=signature, slot=int(result.get("slot") or 0),
-                                received_at=utcnow(), transaction=result))
+        await sink(
+            StreamNotice(
+                signature=signature, slot=int(result.get("slot") or 0), received_at=utcnow(), transaction=result
+            )
+        )

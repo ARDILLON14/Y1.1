@@ -41,26 +41,43 @@ ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 JUPITER_V6_PROGRAM = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 WSOL_MINT = "So11111111111111111111111111111111111111112"
 
-DEFAULT_ALLOWED_PROGRAMS = frozenset({
-    SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, ATA_PROGRAM,
-    JUPITER_V6_PROGRAM,
-})
+DEFAULT_ALLOWED_PROGRAMS = frozenset(
+    {
+        SYSTEM_PROGRAM,
+        COMPUTE_BUDGET_PROGRAM,
+        TOKEN_PROGRAM,
+        TOKEN_2022_PROGRAM,
+        ATA_PROGRAM,
+        JUPITER_V6_PROGRAM,
+    }
+)
 
 # Public Jito tip accounts (mainnet).
-JITO_TIP_ACCOUNTS = frozenset({
-    "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
-    "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
-    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
-    "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
-    "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
-    "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
-    "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
-    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
-})
+JITO_TIP_ACCOUNTS = frozenset(
+    {
+        "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+        "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+        "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+        "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+        "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
+        "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+        "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+        "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
+    }
+)
 
-_TOKEN_FORBIDDEN = {3: "Transfer", 4: "Approve", 6: "SetAuthority", 7: "MintTo", 8: "Burn",
-                    10: "FreezeAccount", 12: "TransferChecked", 13: "ApproveChecked", 14: "MintToChecked",
-                    15: "BurnChecked"}
+_TOKEN_FORBIDDEN = {
+    3: "Transfer",
+    4: "Approve",
+    6: "SetAuthority",
+    7: "MintTo",
+    8: "Burn",
+    10: "FreezeAccount",
+    12: "TransferChecked",
+    13: "ApproveChecked",
+    14: "MintToChecked",
+    15: "BurnChecked",
+}
 _TOKEN_ALLOWED = {9: "CloseAccount", 17: "SyncNative"}
 
 
@@ -77,14 +94,24 @@ class SignIntent:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SignIntent:
-        return cls(client_order_id=str(d["client_order_id"]), purpose=str(d["purpose"]),
-                   input_mint=str(d["input_mint"]), output_mint=str(d["output_mint"]),
-                   amount_in_raw=int(d["amount_in_raw"]), notional_usd=float(d["notional_usd"]))
+        return cls(
+            client_order_id=str(d["client_order_id"]),
+            purpose=str(d["purpose"]),
+            input_mint=str(d["input_mint"]),
+            output_mint=str(d["output_mint"]),
+            amount_in_raw=int(d["amount_in_raw"]),
+            notional_usd=float(d["notional_usd"]),
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return {"client_order_id": self.client_order_id, "purpose": self.purpose,
-                "input_mint": self.input_mint, "output_mint": self.output_mint,
-                "amount_in_raw": self.amount_in_raw, "notional_usd": self.notional_usd}
+        return {
+            "client_order_id": self.client_order_id,
+            "purpose": self.purpose,
+            "input_mint": self.input_mint,
+            "output_mint": self.output_mint,
+            "amount_in_raw": self.amount_in_raw,
+            "notional_usd": self.notional_usd,
+        }
 
 
 @dataclass
@@ -125,9 +152,12 @@ class SignerPolicy:
 
         owner_pk = Pubkey.from_string(self.owner)
         wsol_atas = {
-            str(Pubkey.find_program_address(
-                [bytes(owner_pk), bytes(Pubkey.from_string(prog)), bytes(Pubkey.from_string(WSOL_MINT))],
-                Pubkey.from_string(ATA_PROGRAM))[0])
+            str(
+                Pubkey.find_program_address(
+                    [bytes(owner_pk), bytes(Pubkey.from_string(prog)), bytes(Pubkey.from_string(WSOL_MINT))],
+                    Pubkey.from_string(ATA_PROGRAM),
+                )[0]
+            )
             for prog in (TOKEN_PROGRAM, TOKEN_2022_PROGRAM)
         }
         cu_limit: int | None = None
@@ -218,8 +248,11 @@ class SignerPolicy:
             self._seen_orders.clear()
         # Re-signing the same order (rebroadcast/retry) does not count twice.
         new_order = intent.client_order_id not in self._seen_orders
-        if (intent.purpose == "entry" and new_order
-                and self._day_total + intent.notional_usd > self.limits.max_notional_usd_per_day):
+        if (
+            intent.purpose == "entry"
+            and new_order
+            and self._day_total + intent.notional_usd > self.limits.max_notional_usd_per_day
+        ):
             violations.append("daily notional cap exceeded")
         if violations:
             raise SignerPolicyViolation("; ".join(violations))
@@ -251,6 +284,7 @@ class SignerPolicy:
         p = Path(self.limits.state_file)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"day": self._day, "total": self._day_total,
-                                   "orders": sorted(self._seen_orders)[-5000:]}))
+        tmp.write_text(
+            json.dumps({"day": self._day, "total": self._day_total, "orders": sorted(self._seen_orders)[-5000:]})
+        )
         tmp.replace(p)

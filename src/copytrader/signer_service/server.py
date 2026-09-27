@@ -63,8 +63,7 @@ def create_signer_app(keypair: Any, policy: SignerPolicy, verifier: HmacVerifier
         try:
             verifier.verify(request.method, request.url.path, body, dict(request.headers))
         except AuthError as exc:
-            log.warning("signer_auth_failed", reason=str(exc),
-                        client=request.client.host if request.client else None)
+            log.warning("signer_auth_failed", reason=str(exc), client=request.client.host if request.client else None)
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -91,8 +90,13 @@ def create_signer_app(keypair: Any, policy: SignerPolicy, verifier: HmacVerifier
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (SecurityError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="cannot parse transaction") from exc
-        log.info("signed", order=intent.client_order_id, purpose=intent.purpose,
-                 notional_usd=round(intent.notional_usd, 2), signature=signed.signature)
+        log.info(
+            "signed",
+            order=intent.client_order_id,
+            purpose=intent.purpose,
+            notional_usd=round(intent.notional_usd, 2),
+            signature=signed.signature,
+        )
         return {"tx": base64.b64encode(signed.tx_bytes).decode(), "signature": signed.signature}
 
     return app
@@ -118,10 +122,19 @@ def main() -> None:
     keys = [hmac_key.encode()] + ([hmac_prev.encode()] if hmac_prev else [])
     verifier = HmacVerifier(keys=keys, max_skew_seconds=float(os.environ.get("SIGNER_MAX_SKEW", "30")))
     app = create_signer_app(keypair, policy, verifier)
-    log.info("signer_started", public_key=str(keypair.pubkey()),
-             max_per_tx=limits.max_notional_usd_per_tx, max_per_day=limits.max_notional_usd_per_day)
+    log.info(
+        "signer_started",
+        public_key=str(keypair.pubkey()),
+        max_per_tx=limits.max_notional_usd_per_tx,
+        max_per_day=limits.max_notional_usd_per_day,
+    )
 
     import uvicorn
 
-    uvicorn.run(app, host=os.environ.get("SIGNER_HOST", "0.0.0.0"),  # noqa: S104 (internal network)
-                port=int(os.environ.get("SIGNER_PORT", "8700")), log_level="warning", access_log=False)
+    uvicorn.run(
+        app,
+        host=os.environ.get("SIGNER_HOST", "0.0.0.0"),  # noqa: S104 (internal network)
+        port=int(os.environ.get("SIGNER_PORT", "8700")),
+        log_level="warning",
+        access_log=False,
+    )

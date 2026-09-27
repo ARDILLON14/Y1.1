@@ -156,7 +156,7 @@ class EventBus:
     def publish(self, event: Event) -> None:
         """Schedule all handlers for ``event`` (and its base classes)."""
         for etype in type(event).__mro__:
-            for handler in self._handlers.get(etype, ()):  # type: ignore[call-overload]
+            for handler in self._handlers.get(etype, []):
                 task = asyncio.get_running_loop().create_task(self._run(handler, event))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
@@ -165,8 +165,11 @@ class EventBus:
         try:
             await handler(event)
         except Exception:  # isolate subscriber failures from the publisher
-            log.exception("event_handler_failed", event=type(event).__name__,
-                          handler=getattr(handler, "__qualname__", repr(handler)))
+            log.exception(
+                "event_handler_failed",
+                event=type(event).__name__,
+                handler=getattr(handler, "__qualname__", repr(handler)),
+            )
 
     async def drain(self, timeout: float = 5.0) -> None:
         """Wait for in-flight handlers (used on shutdown and in tests)."""

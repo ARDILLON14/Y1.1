@@ -40,8 +40,17 @@ log = structlog.get_logger(__name__)
 class LiveExecutor:
     mode = TradeMode.LIVE
 
-    def __init__(self, *, quotes: QuoteSource, builder: SwapTxBuilder, chain: ChainClient, signer: Signer,
-                 tokens: TokenInfoProvider, clock: Clock, config: Callable[[], AppConfig]) -> None:
+    def __init__(
+        self,
+        *,
+        quotes: QuoteSource,
+        builder: SwapTxBuilder,
+        chain: ChainClient,
+        signer: Signer,
+        tokens: TokenInfoProvider,
+        clock: Clock,
+        config: Callable[[], AppConfig],
+    ) -> None:
         self.quotes = quotes
         self.builder = builder
         self.chain = chain
@@ -64,8 +73,11 @@ class LiveExecutor:
         cfg = self._config()
         if q.in_amount_raw != req.amount_in_raw or q.input_mint != req.input_mint or q.output_mint != req.output_mint:
             raise ExecutionError("la cotización no corresponde a la orden")
-        max_impact = (cfg.risk.max_slippage_pct if req.purpose is OrderPurpose.ENTRY
-                      else min(cfg.exits.exit_slippage_pct, HL.HARD_MAX_EXIT_SLIPPAGE_PCT))
+        max_impact = (
+            cfg.risk.max_slippage_pct
+            if req.purpose is OrderPurpose.ENTRY
+            else min(cfg.exits.exit_slippage_pct, HL.HARD_MAX_EXIT_SLIPPAGE_PCT)
+        )
         if q.price_impact_frac * 100 > max_impact:
             raise ExecutionError(f"impacto de precio {q.price_impact_frac * 100:.2f}% > {max_impact:.2f}%")
         if req.purpose is OrderPurpose.ENTRY and req.theoretical_price_usd and req.max_price_deviation_pct:
@@ -97,33 +109,52 @@ class LiveExecutor:
             except CopyTraderError as exc:
                 raise ExecutionError(f"sin cotización: {exc}", retryable=True) from exc
         self._validate_quote(req, quote, sol_price)
-        await handle.mark(OrderStatus.QUOTED, expected_out_raw=quote.out_amount_raw,
-                          min_out_raw=quote.min_out_amount_raw)
+        await handle.mark(
+            OrderStatus.QUOTED, expected_out_raw=quote.out_amount_raw, min_out_raw=quote.min_out_amount_raw
+        )
         try:
             built = await self.builder.build_swap(
-                quote, self.wallet, priority_max_lamports=cfg.execution.priority_fee_max_lamports,
-                priority_level=cfg.execution.priority_level, jito_tip_lamports=cfg.execution.jito_tip_lamports)
+                quote,
+                self.wallet,
+                priority_max_lamports=cfg.execution.priority_fee_max_lamports,
+                priority_level=cfg.execution.priority_level,
+                jito_tip_lamports=cfg.execution.jito_tip_lamports,
+            )
         except CopyTraderError as exc:
             raise ExecutionError(f"no se pudo construir la transacción: {exc}", retryable=True) from exc
-        intent = SignIntent(client_order_id=req.client_order_id, purpose=req.purpose.value,
-                            input_mint=req.input_mint, output_mint=req.output_mint,
-                            amount_in_raw=req.amount_in_raw, notional_usd=float(req.notional_usd or 0.0))
+        intent = SignIntent(
+            client_order_id=req.client_order_id,
+            purpose=req.purpose.value,
+            input_mint=req.input_mint,
+            output_mint=req.output_mint,
+            amount_in_raw=req.amount_in_raw,
+            notional_usd=float(req.notional_usd or 0.0),
+        )
         try:
             signed = await self.signer.sign(built.tx_bytes, intent)
         except SecurityError as exc:
             raise ExecutionError(f"firma rechazada: {exc}") from exc
         # Persist BEFORE sending: from here on the order is identified by its signature.
-        await handle.mark(OrderStatus.SIGNED, tx_signature=signed.signature,
-                          last_valid_block_height=built.last_valid_block_height)
-        result = await self.send_and_confirm(handle, req, signed.tx_bytes, signed.signature,
-                                             built.last_valid_block_height, sol_price)
+        await handle.mark(
+            OrderStatus.SIGNED, tx_signature=signed.signature, last_valid_block_height=built.last_valid_block_height
+        )
+        result = await self.send_and_confirm(
+            handle, req, signed.tx_bytes, signed.signature, built.last_valid_block_height, sol_price
+        )
         result.quote_price_usd = quote_price_usd(req, quote, sol_price)
         result.price_impact_bps = quote.price_impact_frac * 10_000
         result.latency_ms = (time.perf_counter() - started) * 1000
         return result
 
-    async def send_and_confirm(self, handle: OrderHandle | None, req: OrderRequest, tx_bytes: bytes,
-                               signature: str, last_valid_block_height: int, sol_price: float) -> ExecutionResult:
+    async def send_and_confirm(
+        self,
+        handle: OrderHandle | None,
+        req: OrderRequest,
+        tx_bytes: bytes,
+        signature: str,
+        last_valid_block_height: int,
+        sol_price: float,
+    ) -> ExecutionResult:
         cfg = self._config().execution
         deadline = time.monotonic() + cfg.confirm_timeout_seconds
         last_send = 0.0
@@ -143,14 +174,30 @@ class LiveExecutor:
             if state == "confirmed":
                 return await self.fill_from_chain(req, signature, sol_price)
             if state.startswith("failed"):
-                return ExecutionResult(success=False, client_order_id=req.client_order_id, mode=self.mode,
-                                       tx_signature=signature, error=f"transacción fallida on-chain: {state}")
+                return ExecutionResult(
+                    success=False,
+                    client_order_id=req.client_order_id,
+                    mode=self.mode,
+                    tx_signature=signature,
+                    error=f"transacción fallida on-chain: {state}",
+                )
             if state == "expired":
-                return ExecutionResult(success=False, client_order_id=req.client_order_id, mode=self.mode,
-                                       tx_signature=signature, error="expired")
+                return ExecutionResult(
+                    success=False,
+                    client_order_id=req.client_order_id,
+                    mode=self.mode,
+                    tx_signature=signature,
+                    error="expired",
+                )
             if now > deadline:
-                return ExecutionResult(success=False, client_order_id=req.client_order_id, mode=self.mode,
-                                       tx_signature=signature, error="pending", retryable=True)
+                return ExecutionResult(
+                    success=False,
+                    client_order_id=req.client_order_id,
+                    mode=self.mode,
+                    tx_signature=signature,
+                    error="pending",
+                    retryable=True,
+                )
             await asyncio.sleep(0.4)
 
     async def signature_state(self, signature: str, last_valid_block_height: int | None) -> str:
@@ -191,23 +238,33 @@ class LiveExecutor:
             await asyncio.sleep(0.3 * (attempt + 1))
         if not tx:
             raise ExecutionError(f"tx {signature} confirmada pero no legible todavía", retryable=True)
-        swaps = [s for s in parse_swaps(tx, self.wallet, sol_price_usd=sol_price,
-                                        quote_mints=self._config().providers.quote_mints)
-                 if s.token_mint == req.token_mint]
+        swaps = [
+            s
+            for s in parse_swaps(
+                tx, self.wallet, sol_price_usd=sol_price, quote_mints=self._config().providers.quote_mints
+            )
+            if s.token_mint == req.token_mint
+        ]
         if not swaps:
             raise ExecutionError(f"no se encontró el swap del token en la tx {signature}")
         s = swaps[0]
         fee_usd = s.fee_sol * sol_price
         qty = s.token_amount
         value = s.value_usd or s.quote_amount * sol_price
-        token_raw = int(round(qty * 10 ** req.token_decimals))
-        quote_raw = int(round(s.quote_amount * 1e9))
+        token_raw = round(qty * 10**req.token_decimals)
+        quote_raw = round(s.quote_amount * 1e9)
         fill_price = value / qty if qty > 0 else None
         return ExecutionResult(
-            success=True, client_order_id=req.client_order_id, mode=self.mode, tx_signature=signature,
+            success=True,
+            client_order_id=req.client_order_id,
+            mode=self.mode,
+            tx_signature=signature,
             in_amount_raw=quote_raw if req.side is Side.BUY else token_raw,
             out_amount_raw=token_raw if req.side is Side.BUY else quote_raw,
-            token_qty=qty, fill_price_usd=fill_price, value_usd=value, fees_usd=fee_usd,
+            token_qty=qty,
+            fill_price_usd=fill_price,
+            value_usd=value,
+            fees_usd=fee_usd,
             slippage_bps=slippage_bps(req.side, fill_price, req.theoretical_price_usd),
             executed_at=s.block_time,
         )

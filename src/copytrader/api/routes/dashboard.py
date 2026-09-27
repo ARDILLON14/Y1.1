@@ -52,9 +52,12 @@ async def overview(request: Request, _: Session = Depends(session)) -> dict[str,
         "mode": c.mode.status().to_dict(),
         "book": book.to_dict(),
         "limits": {
-            "capital_usd": lim.capital_usd, "max_open_positions": lim.max_open_positions,
-            "max_total_exposure_pct": lim.max_total_exposure_pct, "max_daily_loss_pct": lim.max_daily_loss_pct,
-            "max_trade_usd": lim.max_trade_usd, "hard_max_trade_usd": lim.hard_max_trade_usd,
+            "capital_usd": lim.capital_usd,
+            "max_open_positions": lim.max_open_positions,
+            "max_total_exposure_pct": lim.max_total_exposure_pct,
+            "max_daily_loss_pct": lim.max_daily_loss_pct,
+            "max_trade_usd": lim.max_trade_usd,
+            "hard_max_trade_usd": lim.hard_max_trade_usd,
         },
         "risk_used": {
             "exposure": book.exposure_usd / (cap * lim.max_total_exposure_pct / 100) if cap else 0.0,
@@ -71,15 +74,28 @@ async def overview(request: Request, _: Session = Depends(session)) -> dict[str,
 
 
 @router.get("/equity")
-async def equity(request: Request, mode: Literal["paper", "live"] | None = None,
-                 days: int = Query(30, ge=1, le=365), _: Session = Depends(session)) -> dict[str, Any]:
+async def equity(
+    request: Request,
+    mode: Literal["paper", "live"] | None = None,
+    days: int = Query(30, ge=1, le=365),
+    _: Session = Depends(session),
+) -> dict[str, Any]:
     c = ctx(request).container
     m = TradeMode(mode) if mode else _book_mode(c)
     async with c.db.session() as s:
         rows = await EquityRepo(s).series(m, c.clock.now() - timedelta(days=days))
-    return {"mode": m.value, "points": [{"ts": ser.iso(r.ts), "equity": round(r.equity_usd, 2),
-                                         "exposure": round(r.exposure_usd, 2), "drawdown_pct": r.drawdown_pct}
-                                        for r in rows]}
+    return {
+        "mode": m.value,
+        "points": [
+            {
+                "ts": ser.iso(r.ts),
+                "equity": round(r.equity_usd, 2),
+                "exposure": round(r.exposure_usd, 2),
+                "drawdown_pct": r.drawdown_pct,
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.get("/risk")
@@ -91,12 +107,15 @@ async def risk(request: Request, _: Session = Depends(session)) -> dict[str, Any
         events = await RiskEventRepo(s).recent(50)
     cfg = c.cfg
     return {
-        "mode": mode.value, "book": book.to_dict(), "limits": asdict(c.risk.limits()) | {"level": int(c.mode.level)},
-        "exits": cfg.exits.model_dump(mode="json"), "sizing": cfg.sizing.model_dump(mode="json"),
-        "latency": cfg.latency.model_dump(mode="json"), "kill_switches": c.kill.snapshot(),
+        "mode": mode.value,
+        "book": book.to_dict(),
+        "limits": asdict(c.risk.limits()) | {"level": int(c.mode.level)},
+        "exits": cfg.exits.model_dump(mode="json"),
+        "sizing": cfg.sizing.model_dump(mode="json"),
+        "latency": cfg.latency.model_dump(mode="json"),
+        "kill_switches": c.kill.snapshot(),
         "exposures": [asdict(e) for e in book.exposures],
-        "events": [{"ts": ser.iso(e.ts), "type": e.type, "severity": e.severity, "message": e.message}
-                   for e in events],
+        "events": [{"ts": ser.iso(e.ts), "type": e.type, "severity": e.severity, "message": e.message} for e in events],
     }
 
 
@@ -110,8 +129,7 @@ class KillSwitchBody(BaseModel):
 
 
 @router.post("/risk/kill-switch")
-async def kill_switch(body: KillSwitchBody, request: Request,
-                      sess: Session = Depends(write_session)) -> dict[str, Any]:
+async def kill_switch(body: KillSwitchBody, request: Request, sess: Session = Depends(write_session)) -> dict[str, Any]:
     c = ctx(request).container
     ip = client_ip(request)
     if body.action == "activate":
@@ -127,18 +145,26 @@ async def kill_switch(body: KillSwitchBody, request: Request,
 @router.get("/system/status")
 async def system_status(request: Request, _: Session = Depends(session)) -> dict[str, Any]:
     c = ctx(request).container
-    return {"mode": c.mode.status().to_dict(), "health": c.health.snapshot(),
-            "overall": c.health.overall().value, "providers_mode": c.cfg.providers.mode,
-            "last_cycle": asdict(c.cycle.last_report) if c.cycle.last_report else None,
-            "notifications": [ch.name for ch in c.notifier.channels]}
+    return {
+        "mode": c.mode.status().to_dict(),
+        "health": c.health.snapshot(),
+        "overall": c.health.overall().value,
+        "providers_mode": c.cfg.providers.mode,
+        "last_cycle": asdict(c.cycle.last_report) if c.cycle.last_report else None,
+        "notifications": [ch.name for ch in c.notifier.channels],
+    }
 
 
 @router.get("/system/preflight")
 async def preflight(request: Request, _: Session = Depends(session)) -> dict[str, Any]:
     checks = await run_preflight(ctx(request).container)
-    return {"passed": preflight_passed(checks), "checks": [
-        {"name": ch.name, "label": ch.label, "passed": ch.passed, "critical": ch.critical, "message": ch.message}
-        for ch in checks]}
+    return {
+        "passed": preflight_passed(checks),
+        "checks": [
+            {"name": ch.name, "label": ch.label, "passed": ch.passed, "critical": ch.critical, "message": ch.message}
+            for ch in checks
+        ],
+    }
 
 
 class LevelBody(BaseModel):
@@ -190,8 +216,12 @@ async def evaluate_now(request: Request, _: Session = Depends(write_session)) ->
 @router.get("/config")
 async def get_config(request: Request, _: Session = Depends(session)) -> dict[str, Any]:
     svc = ctx(request).container.config_service
-    return {"version": svc.version, "config": svc.current.model_dump(mode="json"), "overrides": svc.overrides,
-            "mutable_sections": sorted(RUNTIME_MUTABLE_SECTIONS)}
+    return {
+        "version": svc.version,
+        "config": svc.current.model_dump(mode="json"),
+        "overrides": svc.overrides,
+        "mutable_sections": sorted(RUNTIME_MUTABLE_SECTIONS),
+    }
 
 
 class ConfigPatch(BaseModel):
@@ -210,16 +240,25 @@ async def patch_config(body: ConfigPatch, request: Request, sess: Session = Depe
     c = ctx(request).container
     await c.config_service.apply_patch(body.patch, author=sess.username, comment=body.comment)
     async with c.db.session() as s:
-        await AuditRepo(s).add(sess.username, "config_patch", None, {"patch": body.patch, "comment": body.comment},
-                               client_ip(request))
+        await AuditRepo(s).add(
+            sess.username, "config_patch", None, {"patch": body.patch, "comment": body.comment}, client_ip(request)
+        )
     return {"version": c.config_service.version}
 
 
 @router.get("/config/history")
 async def config_history(request: Request, _: Session = Depends(session)) -> list[dict[str, Any]]:
     store = DbConfigStore(ctx(request).container.db)
-    return [{"version": v.version, "author": v.author, "comment": v.comment, "created_at": ser.iso(v.created_at),
-             "overrides": v.overrides} for v in await store.history()]
+    return [
+        {
+            "version": v.version,
+            "author": v.author,
+            "comment": v.comment,
+            "created_at": ser.iso(v.created_at),
+            "overrides": v.overrides,
+        }
+        for v in await store.history()
+    ]
 
 
 @router.post("/config/rollback/{version}")
@@ -233,12 +272,19 @@ async def rollback(version: int, request: Request, sess: Session = Depends(write
 
 # ---------------------------------------------------------------- alerts/audit
 @router.get("/alerts")
-async def alerts(request: Request, limit: int = Query(100, ge=1, le=500), type: str | None = None,
-                 severity: str | None = None, unacknowledged: bool = False, before: int | None = None,
-                 _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def alerts(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    type: str | None = None,
+    severity: str | None = None,
+    unacknowledged: bool = False,
+    before: int | None = None,
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     async with ctx(request).container.db.session() as s:
-        rows = await AlertRepo(s).list(limit=limit, type_=type, severity=severity, unacknowledged=unacknowledged,
-                                       before_id=before)
+        rows = await AlertRepo(s).list(
+            limit=limit, type_=type, severity=severity, unacknowledged=unacknowledged, before_id=before
+        )
     return [ser.alert(a) for a in rows]
 
 

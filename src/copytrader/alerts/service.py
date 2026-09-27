@@ -37,8 +37,9 @@ log = structlog.get_logger(__name__)
 
 
 class AlertService:
-    def __init__(self, db: Database, clock: Clock, config: Callable[[], AppConfig],
-                 notifier: NotificationService) -> None:
+    def __init__(
+        self, db: Database, clock: Clock, config: Callable[[], AppConfig], notifier: NotificationService
+    ) -> None:
         self.db = db
         self.clock = clock
         self._config = config
@@ -55,27 +56,47 @@ class AlertService:
         bus.subscribe(ProviderStatusChanged, self._on_provider)
         bus.subscribe(SystemMessage, self._on_system)
 
-    async def raise_alert(self, type_: AlertType, severity: Severity, title: str, body: str,
-                          data: dict[str, Any] | None = None, dedupe_key: str | None = None) -> None:
+    async def raise_alert(
+        self,
+        type_: AlertType,
+        severity: Severity,
+        title: str,
+        body: str,
+        data: dict[str, Any] | None = None,
+        dedupe_key: str | None = None,
+    ) -> None:
         title, body = REDACTOR.text(title), REDACTOR.text(body)
         channels: list[str] = []
         cfg = self._config().notifications
-        if cfg.events.get(type_, True):
-            if self.notifier.submit(Notification(title, body, severity, dedupe_key)):
-                channels = [c.name for c in self.notifier.channels]
+        if cfg.events.get(type_, True) and self.notifier.submit(Notification(title, body, severity, dedupe_key)):
+            channels = [c.name for c in self.notifier.channels]
         try:
             async with self.db.session() as s:
-                await AlertRepo(s).add(Alert(ts=self.clock.now(), type=type_.value, severity=severity.value,
-                                             title=title[:200], body=body, data=REDACTOR.data(data or {}),
-                                             dedupe_key=dedupe_key, channels=channels))
+                await AlertRepo(s).add(
+                    Alert(
+                        ts=self.clock.now(),
+                        type=type_.value,
+                        severity=severity.value,
+                        title=title[:200],
+                        body=body,
+                        data=REDACTOR.data(data or {}),
+                        dedupe_key=dedupe_key,
+                        channels=channels,
+                    )
+                )
         except Exception:
             log.exception("alert_persist_failed", title=title)
 
     async def _on_signal_decided(self, ev: SignalDecided) -> None:
         title, body = fmt.format_signal_decided(ev)
-        await self.raise_alert(AlertType.TRADE_COPIED if ev.approved else AlertType.TRADE_REJECTED,
-                               Severity.INFO, title, body,
-                               {**fmt.as_dict(ev), "explanation": ev.explanation}, f"sig:{ev.signal_id}")
+        await self.raise_alert(
+            AlertType.TRADE_COPIED if ev.approved else AlertType.TRADE_REJECTED,
+            Severity.INFO,
+            title,
+            body,
+            {**fmt.as_dict(ev), "explanation": ev.explanation},
+            f"sig:{ev.signal_id}",
+        )
 
     async def _on_signal_alert(self, ev: SignalAlert) -> None:
         title, body = fmt.format_signal_alert(ev)
@@ -83,34 +104,49 @@ class AlertService:
 
     async def _on_position_closed(self, ev: PositionClosed) -> None:
         title, body = fmt.format_position_closed(ev)
-        await self.raise_alert(AlertType.POSITION_CLOSED, Severity.INFO, title, body, fmt.as_dict(ev),
-                               f"pos:{ev.position_id}")
+        await self.raise_alert(
+            AlertType.POSITION_CLOSED, Severity.INFO, title, body, fmt.as_dict(ev), f"pos:{ev.position_id}"
+        )
 
     async def _on_execution_failed(self, ev: ExecutionFailed) -> None:
         title, body = fmt.format_execution_failed(ev)
-        await self.raise_alert(AlertType.EXECUTION_ERROR, Severity.WARNING, title, body, fmt.as_dict(ev),
-                               f"exec:{ev.client_order_id}")
+        await self.raise_alert(
+            AlertType.EXECUTION_ERROR, Severity.WARNING, title, body, fmt.as_dict(ev), f"exec:{ev.client_order_id}"
+        )
 
     async def _on_wallet_status(self, ev: WalletStatusChanged) -> None:
         title, body = fmt.format_wallet_status(ev)
-        await self.raise_alert(AlertType.WALLET_DEGRADED if ev.degraded else AlertType.WALLET_STATUS,
-                               Severity.WARNING if ev.degraded else Severity.INFO, title, body, fmt.as_dict(ev))
+        await self.raise_alert(
+            AlertType.WALLET_DEGRADED if ev.degraded else AlertType.WALLET_STATUS,
+            Severity.WARNING if ev.degraded else Severity.INFO,
+            title,
+            body,
+            fmt.as_dict(ev),
+        )
 
     async def _on_kill_switch(self, ev: KillSwitchChanged) -> None:
         title, body = fmt.format_kill_switch(ev)
-        await self.raise_alert(AlertType.KILL_SWITCH, Severity.CRITICAL if ev.active else Severity.INFO,
-                               title, body, fmt.as_dict(ev))
+        await self.raise_alert(
+            AlertType.KILL_SWITCH, Severity.CRITICAL if ev.active else Severity.INFO, title, body, fmt.as_dict(ev)
+        )
 
     async def _on_risk(self, ev: RiskLimitHit) -> None:
         title, body = fmt.format_risk(ev)
-        await self.raise_alert(AlertType.RISK_EXCEEDED, Severity.CRITICAL, title, body, fmt.as_dict(ev),
-                               f"risk:{ev.limit}")
+        await self.raise_alert(
+            AlertType.RISK_EXCEEDED, Severity.CRITICAL, title, body, fmt.as_dict(ev), f"risk:{ev.limit}"
+        )
 
     async def _on_provider(self, ev: ProviderStatusChanged) -> None:
         title, body = fmt.format_provider(ev)
         type_ = AlertType.RPC_PROBLEM if ev.kind == "rpc" else AlertType.API_DISCONNECTED
-        await self.raise_alert(type_, Severity.INFO if ev.healthy else Severity.WARNING, title, body,
-                               fmt.as_dict(ev), f"prov:{ev.provider}:{ev.healthy}")
+        await self.raise_alert(
+            type_,
+            Severity.INFO if ev.healthy else Severity.WARNING,
+            title,
+            body,
+            fmt.as_dict(ev),
+            f"prov:{ev.provider}:{ev.healthy}",
+        )
 
     async def _on_system(self, ev: SystemMessage) -> None:
         title, body = fmt.format_system(ev)

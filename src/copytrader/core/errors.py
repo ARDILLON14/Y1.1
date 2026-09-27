@@ -14,8 +14,9 @@ class ConfigError(CopyTraderError):
 class ProviderError(CopyTraderError):
     """An external dependency failed. ``retryable`` drives the retry policy."""
 
-    def __init__(self, message: str, *, provider: str = "", retryable: bool = True,
-                 status_code: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, provider: str = "", retryable: bool = True, status_code: int | None = None
+    ) -> None:
         super().__init__(message)
         self.provider = provider
         self.retryable = retryable

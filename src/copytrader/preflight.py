@@ -19,8 +19,12 @@ async def run_preflight(c: Container) -> list[CheckResult]:
     def add(name: str, label: str, ok: bool, message: str = "", critical: bool = True) -> None:
         checks.append(CheckResult(name, label, ok, message=message, critical=critical))
 
-    add("providers_live", "Proveedores reales (no simulados)", cfg.providers.mode == "live",
-        f"providers.mode = {cfg.providers.mode}")
+    add(
+        "providers_live",
+        "Proveedores reales (no simulados)",
+        cfg.providers.mode == "live",
+        f"providers.mode = {cfg.providers.mode}",
+    )
     add("live_enabled", "levels.live_trading_enabled activo", cfg.levels.live_trading_enabled)
     add("level", "Nivel máximo configurado ≥ 4", cfg.app.operating_level >= 4, f"{int(cfg.app.operating_level)}")
     try:
@@ -31,8 +35,12 @@ async def run_preflight(c: Container) -> list[CheckResult]:
     add("kill_switch", "Kill switches inactivos", c.kill.blocking_reason() is None, c.kill.blocking_reason() or "")
 
     live = c.providers.live_executor
-    add("live_executor", "Ejecutor real configurado (signer + wallet)", live is not None,
-        "configura security.signer_mode y execution.wallet_public_key")
+    add(
+        "live_executor",
+        "Ejecutor real configurado (signer + wallet)",
+        live is not None,
+        "configura security.signer_mode y execution.wallet_public_key",
+    )
     rpc = c.providers.rpc
     if rpc is not None:
         healthy = await rpc.get_health()
@@ -48,12 +56,19 @@ async def run_preflight(c: Container) -> list[CheckResult]:
             balance = await live.chain.get_balance(live.wallet) / 1e9
             sol = await c.tokens.sol_price() or 0.0
             needed = cfg.risk.reserve_sol + cfg.risk.min_trade_usd / sol if sol else float("inf")
-            add("balance", "Saldo suficiente en la wallet del bot", balance >= needed,
-                f"{balance:.4f} SOL (mínimo {needed:.4f})")
-            add("balance_cap", "Saldo de la wallet no excesivo (capital mínimo necesario)",
+            add(
+                "balance",
+                "Saldo suficiente en la wallet del bot",
+                balance >= needed,
+                f"{balance:.4f} SOL (mínimo {needed:.4f})",
+            )
+            add(
+                "balance_cap",
+                "Saldo de la wallet no excesivo (capital mínimo necesario)",
                 balance * sol <= cfg.risk.capital_usd * 1.5,
                 f"{balance * sol:,.0f} USD en la wallet vs capital configurado {cfg.risk.capital_usd:,.0f}",
-                critical=False)
+                critical=False,
+            )
         except Exception as exc:
             add("balance", "Saldo suficiente en la wallet del bot", False, str(exc)[:200])
     feed_ok = any(h["kind"] == "websocket" and h["status"] == "ok" for h in c.health.snapshot())
@@ -61,16 +76,27 @@ async def run_preflight(c: Container) -> list[CheckResult]:
     add("notifications", "Canal de notificaciones configurado", c.notifier.enabled, critical=False)
 
     async with c.db.session() as s:
-        first = (await s.execute(select(func.min(Position.opened_at)).where(
-            Position.mode == TradeMode.PAPER.value))).scalar_one_or_none()
-        n_paper = (await s.execute(select(func.count()).select_from(Position).where(
-            Position.mode == TradeMode.PAPER.value))).scalar_one()
+        first = (
+            await s.execute(select(func.min(Position.opened_at)).where(Position.mode == TradeMode.PAPER.value))
+        ).scalar_one_or_none()
+        n_paper = (
+            await s.execute(select(func.count()).select_from(Position).where(Position.mode == TradeMode.PAPER.value))
+        ).scalar_one()
     days = (c.clock.now() - first).total_seconds() / 86400 if first else 0.0
     need = cfg.levels.preflight_min_paper_days
-    add("paper_history", f"≥ {need} días de paper trading", days >= need or need == 0,
-        f"{days:.1f} días, {n_paper} posiciones paper", critical=False)
-    add("capital", "Límites de nivel 4 más estrictos que la config",
-        cfg.levels.level4.max_trade_usd <= cfg.risk.max_trade_usd, critical=False)
+    add(
+        "paper_history",
+        f"≥ {need} días de paper trading",
+        days >= need or need == 0,
+        f"{days:.1f} días, {n_paper} posiciones paper",
+        critical=False,
+    )
+    add(
+        "capital",
+        "Límites de nivel 4 más estrictos que la config",
+        cfg.levels.level4.max_trade_usd <= cfg.risk.max_trade_usd,
+        critical=False,
+    )
     _ = timedelta
     return checks
 

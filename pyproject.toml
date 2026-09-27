@@ -55,7 +55,7 @@ asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["ignore::DeprecationWarning:websockets.*"]
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py312"
 src = ["src", "tests"]
 
@@ -73,6 +73,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106", "S108"]
+"src/copytrader/providers/solana/constants.py" = ["S105"]
+"src/copytrader/security/signer_policy.py" = ["S105"]
+"src/copytrader/config/models.py" = ["S105"]
 
 [tool.mypy]
 python_version = "3.12"

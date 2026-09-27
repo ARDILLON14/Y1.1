@@ -80,8 +80,7 @@ def wilson_lower_bound(successes: float, n: float, z: float = 1.645) -> float | 
     return max(0.0, (centre - margin) / denom)
 
 
-def mean_lower_bound(values: Sequence[float], z: float = 1.645,
-                     weights: Sequence[float] | None = None) -> float | None:
+def mean_lower_bound(values: Sequence[float], z: float = 1.645, weights: Sequence[float] | None = None) -> float | None:
     """``mean − z·σ/√n_eff``: penalises small or noisy samples."""
     m = mean(values, weights)
     s = std(values, weights)

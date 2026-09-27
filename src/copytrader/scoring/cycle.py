@@ -62,9 +62,17 @@ class CycleReport:
 
 
 class EvaluationCycle:
-    def __init__(self, *, db: Database, clock: Clock, config: Callable[[], AppConfig], bus: EventBus,
-                 tokens: TokenInfoProvider, sol_history: SolPriceHistory | None = None,
-                 price_at: PriceAt | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        db: Database,
+        clock: Clock,
+        config: Callable[[], AppConfig],
+        bus: EventBus,
+        tokens: TokenInfoProvider,
+        sol_history: SolPriceHistory | None = None,
+        price_at: PriceAt | None = None,
+    ) -> None:
         self.db = db
         self.clock = clock
         self._config = config
@@ -91,8 +99,11 @@ class EvaluationCycle:
         except CopyTraderError as exc:
             log.warning("regime_series_failed", error=str(exc))
             return None
-        return RegimeClassifier(series, trend_threshold_pct=a.regime_trend_threshold_pct,
-                                extreme_threshold_pct=a.regime_high_vol_threshold_pct)
+        return RegimeClassifier(
+            series,
+            trend_threshold_pct=a.regime_trend_threshold_pct,
+            extreme_threshold_pct=a.regime_high_vol_threshold_pct,
+        )
 
     async def run(self) -> CycleReport:
         async with self._lock:
@@ -112,9 +123,15 @@ class EvaluationCycle:
         for wid, sw in rows:
             by_wallet[wid].append(sw)
         contexts = {
-            mint: TokenContext(mint=mint, category=t.category or "unknown", liquidity_usd=t.last_liquidity_usd,
-                               market_cap_usd=t.last_market_cap_usd, risk_score=t.risk_score,
-                               is_rugged=t.is_rugged, pair_created_at=t.pair_created_at)
+            mint: TokenContext(
+                mint=mint,
+                category=t.category or "unknown",
+                liquidity_usd=t.last_liquidity_usd,
+                market_cap_usd=t.last_market_cap_usd,
+                risk_score=t.risk_score,
+                is_rugged=t.is_rugged,
+                pair_created_at=t.pair_created_at,
+            )
             for mint, t in token_rows.items()
         }
         regimes = await self._regimes(since, now)
@@ -122,9 +139,16 @@ class EvaluationCycle:
         analyses: dict[int, WalletAnalysis] = {}
         open_mints: set[str] = set()
         for w in wallets:
-            analyses[w.id] = self.analyzer.analyze(w.id, w.address, by_wallet.get(w.id, []), now=now,
-                                                   tokens=contexts, current_prices={}, regimes=regimes,
-                                                   price_at=self.price_at)
+            analyses[w.id] = self.analyzer.analyze(
+                w.id,
+                w.address,
+                by_wallet.get(w.id, []),
+                now=now,
+                tokens=contexts,
+                current_prices={},
+                regimes=regimes,
+                price_at=self.price_at,
+            )
             open_mints.update(lot.token_mint for lot in analyses[w.id].recon.open_lots if not lot.stale)
         prices: dict[str, float] = {}
         if open_mints:
@@ -136,30 +160,56 @@ class EvaluationCycle:
             for w in wallets:
                 if any(lot.token_mint in prices for lot in analyses[w.id].recon.open_lots):
                     analyses[w.id] = self.analyzer.analyze(
-                        w.id, w.address, by_wallet.get(w.id, []), now=now, tokens=contexts,
-                        current_prices=prices, regimes=regimes, price_at=self.price_at)
+                        w.id,
+                        w.address,
+                        by_wallet.get(w.id, []),
+                        now=now,
+                        tokens=contexts,
+                        current_prices=prices,
+                        regimes=regimes,
+                        price_at=self.price_at,
+                    )
 
         coordination = CoordinationIndex(
-            ((a.address, sw.token_mint, sw.block_time) for a in analyses.values() for sw in a.swaps
-             if sw.side is Side.BUY), cfg.detection.coordination_window_seconds)
+            (
+                (a.address, sw.token_mint, sw.block_time)
+                for a in analyses.values()
+                for sw in a.swaps
+                if sw.side is Side.BUY
+            ),
+            cfg.detection.coordination_window_seconds,
+        )
 
         evaluations: list[WalletEvaluation] = []
         for w in wallets:
             analysis = analyses[w.id]
-            ctx = DetectionContext(analysis=analysis, tokens=contexts, coordination=coordination,
-                                   cfg=cfg.detection, degradation=cfg.scoring.degradation, now=now)
+            ctx = DetectionContext(
+                analysis=analysis,
+                tokens=contexts,
+                coordination=coordination,
+                cfg=cfg.detection,
+                degradation=cfg.scoring.degradation,
+                now=now,
+            )
             flags = self.detector.detect(ctx)
             score = self.scorer.score(analysis, flags)
             list_type = ListType(w.list_type)
-            status = decide_status(list_type=list_type, score=score.score, metrics=analysis.all, flags=flags,
-                                   rules=cfg.status_rules)
-            evaluations.append(WalletEvaluation(w.id, w.address, w.label, list_type, analysis, flags, score,
-                                                status, w.status))
+            status = decide_status(
+                list_type=list_type, score=score.score, metrics=analysis.all, flags=flags, rules=cfg.status_rules
+            )
+            evaluations.append(
+                WalletEvaluation(w.id, w.address, w.label, list_type, analysis, flags, score, status, w.status)
+            )
 
         previous = {w.address for w in wallets if w.selected}
         selection = select_wallets(
-            [Candidate(e.wallet_id, e.address, e.score.score, e.status.status, e.list_type, e.label)
-             for e in evaluations], previous, cfg.selection)
+            [
+                Candidate(e.wallet_id, e.address, e.score.score, e.status.status, e.list_type, e.label)
+                for e in evaluations
+            ],
+            previous,
+            cfg.selection,
+        )
         await self._persist(evaluations, selection, now)
         await self._notify(evaluations)
         for listener in self._listeners:
@@ -176,8 +226,13 @@ class EvaluationCycle:
         prom.SELECTED_WALLETS.set(len(selection.selected))
         report.duration_seconds = round(self.clock.monotonic() - started, 3)
         self.last_report = report
-        log.info("evaluation_cycle_done", wallets=report.evaluated, selected=len(report.selected),
-                 statuses=report.status_counts, seconds=report.duration_seconds)
+        log.info(
+            "evaluation_cycle_done",
+            wallets=report.evaluated,
+            selected=len(report.selected),
+            statuses=report.status_counts,
+            seconds=report.duration_seconds,
+        )
         return report
 
     async def _persist(self, evaluations: list[WalletEvaluation], selection: SelectionResult, now: Any) -> None:
@@ -193,32 +248,48 @@ class EvaluationCycle:
                     if window != "all":  # keep the secondary windows compact
                         for heavy in ("period_pnl", "by_token", "by_category", "by_holding", "by_regime"):
                             data.pop(heavy, None)
-                    await analytics.upsert_metrics(e.wallet_id, window, data, now,
-                                                   cfg.analysis.metrics_snapshot_hours)
+                    await analytics.upsert_metrics(e.wallet_id, window, data, now, cfg.analysis.metrics_snapshot_hours)
                 await analytics.replace_flags(e.wallet_id, e.flags, now)
                 is_selected = e.address in selected
                 rank = selection.ranks.get(e.address)
-                await analytics.add_score_throttled(WalletScore(
-                    wallet_id=e.wallet_id, computed_at=now, score=e.score.score, score_hist=e.score.score_hist,
-                    score_recent=e.score.score_recent, confidence=e.score.confidence,
-                    components=e.score.components, penalties=e.score.penalties, status=e.status.status.value,
-                    status_reasons=e.status.reasons, rank=rank, selected=is_selected,
-                ), cfg.analysis.score_snapshot_minutes)
+                await analytics.add_score_throttled(
+                    WalletScore(
+                        wallet_id=e.wallet_id,
+                        computed_at=now,
+                        score=e.score.score,
+                        score_hist=e.score.score_hist,
+                        score_recent=e.score.score_recent,
+                        confidence=e.score.confidence,
+                        components=e.score.components,
+                        penalties=e.score.penalties,
+                        status=e.status.status.value,
+                        status_reasons=e.status.reasons,
+                        rank=rank,
+                        selected=is_selected,
+                    ),
+                    cfg.analysis.score_snapshot_minutes,
+                )
                 w = await wallets.get(e.wallet_id)
                 if w is None:
                     continue
                 if w.status != e.status.status.value:
                     w.status_changed_at = now
                 w.status = e.status.status.value
-                w.status_reasons = e.status.reasons + ([selection.reasons[e.address]]
-                                                       if e.address in selection.reasons else [])
+                w.status_reasons = e.status.reasons + (
+                    [selection.reasons[e.address]] if e.address in selection.reasons else []
+                )
                 w.score = e.score.score
                 w.rank = rank
                 w.selected = is_selected
                 w.analyzed_at = now
-            await analytics.add_selection(SelectionSnapshot(
-                computed_at=now, top_n=cfg.selection.top_n, selected=sorted(selected),
-                details={a: r for a, r in selection.reasons.items() if a in selected}))
+            await analytics.add_selection(
+                SelectionSnapshot(
+                    computed_at=now,
+                    top_n=cfg.selection.top_n,
+                    selected=sorted(selected),
+                    details={a: r for a, r in selection.reasons.items() if a in selected},
+                )
+            )
 
     async def _notify(self, evaluations: list[WalletEvaluation]) -> None:
         for e in evaluations:
@@ -226,6 +297,13 @@ class EvaluationCycle:
             if e.previous_status is None or e.previous_status == new:
                 continue
             degraded = e.previous_status == WalletStatus.ACTIVE.value and new != WalletStatus.ACTIVE.value
-            self.bus.publish(WalletStatusChanged(wallet=e.address, wallet_label=e.label,
-                                                 old_status=e.previous_status, new_status=new,
-                                                 reasons=e.status.reasons, degraded=degraded))
+            self.bus.publish(
+                WalletStatusChanged(
+                    wallet=e.address,
+                    wallet_label=e.label,
+                    old_status=e.previous_status,
+                    new_status=new,
+                    reasons=e.status.reasons,
+                    degraded=degraded,
+                )
+            )

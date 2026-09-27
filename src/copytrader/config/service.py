@@ -92,9 +92,7 @@ def validate_patch_scope(patch: Mapping[str, Any]) -> None:
     for key in _flatten(patch):
         section = key.split(".", 1)[0]
         if section not in RUNTIME_MUTABLE_SECTIONS:
-            raise ConfigError(
-                f"'{key}' no se puede cambiar en caliente; edita config/settings.yaml y reinicia"
-            )
+            raise ConfigError(f"'{key}' no se puede cambiar en caliente; edita config/settings.yaml y reinicia")
         if any(key == locked or key.startswith(locked + ".") for locked in LOCKED_KEYS):
             raise ConfigError(f"'{key}' está bloqueada; solo puede cambiarse en el YAML")
 
@@ -174,12 +172,10 @@ class ConfigService:
         async with self._lock:
             validate_patch_scope(target.overrides)
             cfg = build_config(deep_merge(self._base_raw, target.overrides))
-            await self._commit(cfg, dict(target.overrides), author=author,
-                               comment=f"rollback a v{version}")
+            await self._commit(cfg, dict(target.overrides), author=author, comment=f"rollback a v{version}")
             return cfg
 
-    async def _commit(self, cfg: AppConfig, overrides: dict[str, Any], *, author: str,
-                      comment: str) -> None:
+    async def _commit(self, cfg: AppConfig, overrides: dict[str, Any], *, author: str, comment: str) -> None:
         version = ConfigVersion(self._version + 1, overrides, author, comment)
         if self._store is not None:
             await self._store.save(version)  # persist first: a crash never loses an applied change

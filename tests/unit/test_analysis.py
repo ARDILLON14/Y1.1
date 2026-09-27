@@ -31,7 +31,7 @@ def test_drawdown_and_streaks():
 
 
 def test_two_proportion_detects_drop():
-    z, p = stats.two_proportion_z(70, 100, 10, 30)
+    _, p = stats.two_proportion_z(70, 100, 10, 30)
     assert p < 0.01
     _, p2 = stats.two_proportion_z(50, 100, 14, 30)
     assert p2 > 0.2
@@ -106,10 +106,11 @@ def test_metrics_concentration_and_outliers():
 
 
 def test_metrics_breakdowns_and_regimes():
-    trades = [trade(0.1, hold_minutes=2, regime="bull", category="cap:small"),
-              trade(-0.1, hold_minutes=600, regime="extreme_down", category="cap:micro",
-                    start=T0 + timedelta(days=1)),
-              trade(0.2, hold_minutes=3000, regime="extreme_up", category="cap:micro", start=T0 + timedelta(days=2))]
+    trades = [
+        trade(0.1, hold_minutes=2, regime="bull", category="cap:small"),
+        trade(-0.1, hold_minutes=600, regime="extreme_down", category="cap:micro", start=T0 + timedelta(days=1)),
+        trade(0.2, hold_minutes=3000, regime="extreme_up", category="cap:micro", start=T0 + timedelta(days=2)),
+    ]
     m = compute_metrics(trades, window="all", now=T0 + timedelta(days=5), min_replicable_hold_seconds=300)
     assert m.fast_vs_slow["fast"]["n"] == 1 and m.fast_vs_slow["slow"]["n"] == 2
     assert set(m.by_regime) == {"bull", "extreme_down", "extreme_up"}

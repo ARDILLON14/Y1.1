@@ -17,7 +17,6 @@ copy signal.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -102,7 +101,7 @@ class _TokenDelta:
         return self.post_raw - self.pre_raw
 
     def ui(self, raw: int) -> float:
-        return raw / (10 ** self.decimals)
+        return raw / (10**self.decimals)
 
 
 def parse_swaps(
@@ -110,7 +109,7 @@ def parse_swaps(
     wallet: str,
     *,
     sol_price_usd: float | None,
-    quote_mints: Iterable[str] = (SOL_MINT,) + tuple(STABLE_MINTS),
+    quote_mints: Iterable[str] = (SOL_MINT, *STABLE_MINTS),
     token_price_usd: Callable[[str], float | None] | None = None,
     source: TxSource = TxSource.STREAM,
     detected_at: datetime | None = None,
@@ -191,22 +190,35 @@ def parse_swaps(
         return []
     dex = _dex_label(keys)
 
-    def make(td: _TokenDelta, side: Side, quote_mint: str, quote_amount: float,
-             value_usd: float | None) -> SwapEvent | None:
+    def make(
+        td: _TokenDelta, side: Side, quote_mint: str, quote_amount: float, value_usd: float | None
+    ) -> SwapEvent | None:
         amount = abs(td.ui(td.delta_raw))
         if amount <= 0 or quote_amount <= 0:
             return None
         price_quote = quote_amount / amount
         valid_usd = value_usd is not None and value_usd == value_usd and value_usd > 0
         return SwapEvent(
-            wallet=wallet, signature=tx.signature, slot=tx.slot, block_time=block_time,
-            token_mint=td.mint, side=side, token_amount=amount, token_decimals=td.decimals,
-            quote_mint=quote_mint, quote_amount=quote_amount, price_quote=price_quote,
+            wallet=wallet,
+            signature=tx.signature,
+            slot=tx.slot,
+            block_time=block_time,
+            token_mint=td.mint,
+            side=side,
+            token_amount=amount,
+            token_decimals=td.decimals,
+            quote_mint=quote_mint,
+            quote_amount=quote_amount,
+            price_quote=price_quote,
             price_usd=(value_usd / amount) if valid_usd and value_usd else None,
             value_usd=value_usd if valid_usd else None,
-            sol_price_usd=sol_price_usd, fee_sol=fee_sol, dex=dex,
-            token_balance_before=td.ui(td.pre_raw), token_balance_after=td.ui(td.post_raw),
-            source=source, detected_at=detected_at,
+            sol_price_usd=sol_price_usd,
+            fee_sol=fee_sol,
+            dex=dex,
+            token_balance_before=td.ui(td.pre_raw),
+            token_balance_after=td.ui(td.post_raw),
+            source=source,
+            detected_at=detected_at,
         )
 
     if len(changed) == 1:
@@ -237,8 +249,10 @@ def parse_swaps(
             return []
         value = abs(sell_td.ui(sell_td.delta_raw)) * sell_px
         out: list[SwapEvent] = []
-        for ev in (make(sell_td, Side.SELL, buy_td.mint, abs(buy_td.ui(buy_td.delta_raw)), value),
-                   make(buy_td, Side.BUY, sell_td.mint, abs(sell_td.ui(sell_td.delta_raw)), value)):
+        for ev in (
+            make(sell_td, Side.SELL, buy_td.mint, abs(buy_td.ui(buy_td.delta_raw)), value),
+            make(buy_td, Side.BUY, sell_td.mint, abs(sell_td.ui(sell_td.delta_raw)), value),
+        ):
             if ev:
                 out.append(ev)
         return out

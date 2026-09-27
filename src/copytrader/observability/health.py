@@ -62,8 +62,14 @@ class HealthRegistry:
         item.extra.update(extra)
         return changed
 
-    def fail(self, name: str, kind: str = "component", error: str = "",
-             status: HealthStatus = HealthStatus.DOWN, **extra: Any) -> bool:
+    def fail(
+        self,
+        name: str,
+        kind: str = "component",
+        error: str = "",
+        status: HealthStatus = HealthStatus.DOWN,
+        **extra: Any,
+    ) -> bool:
         """Mark unhealthy. Returns True if this is a transition from OK/unknown."""
         item = self._get(name, kind)
         changed = item.status is not status

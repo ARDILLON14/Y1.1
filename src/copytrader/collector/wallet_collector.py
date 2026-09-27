@@ -24,10 +24,15 @@ from copytrader.providers.solana.constants import is_valid_address
 log = structlog.get_logger(__name__)
 
 _LIST_ALIASES = {
-    "": ListType.NONE, "none": ListType.NONE, "-": ListType.NONE,
-    "white": ListType.WHITELIST, "whitelist": ListType.WHITELIST,
-    "watch": ListType.WATCHLIST, "watchlist": ListType.WATCHLIST,
-    "black": ListType.BLACKLIST, "blacklist": ListType.BLACKLIST,
+    "": ListType.NONE,
+    "none": ListType.NONE,
+    "-": ListType.NONE,
+    "white": ListType.WHITELIST,
+    "whitelist": ListType.WHITELIST,
+    "watch": ListType.WATCHLIST,
+    "watchlist": ListType.WATCHLIST,
+    "black": ListType.BLACKLIST,
+    "blacklist": ListType.BLACKLIST,
 }
 
 
@@ -46,9 +51,15 @@ def parse_list_type(value: str | None) -> ListType:
 
 
 class WalletCollector:
-    def __init__(self, db: Database, history: HistorySource, tokens: TokenInfoProvider, clock: Clock,
-                 config: Callable[[], AppConfig],
-                 address_validator: Callable[[str], bool] = is_valid_address) -> None:
+    def __init__(
+        self,
+        db: Database,
+        history: HistorySource,
+        tokens: TokenInfoProvider,
+        clock: Clock,
+        config: Callable[[], AppConfig],
+        address_validator: Callable[[str], bool] = is_valid_address,
+    ) -> None:
         self.db = db
         self.history = history
         self.tokens = tokens
@@ -58,16 +69,18 @@ class WalletCollector:
         self._backfill_sem = asyncio.Semaphore(config().providers.solana.backfill_concurrency)
 
     # ------------------------------------------------------------ registration
-    async def add_wallet(self, address: str, *, label: str | None = None,
-                         list_type: ListType | None = None, notes: str | None = None) -> bool:
+    async def add_wallet(
+        self, address: str, *, label: str | None = None, list_type: ListType | None = None, notes: str | None = None
+    ) -> bool:
         address = address.strip()
         if not self._validate(address):
             raise ValueError(f"dirección inválida: {address!r}")
         async with self.db.session() as s:
             repo = WalletRepo(s)
             existing = await repo.get_by_address(address)
-            if (existing is None or not existing.is_tracked) and \
-                    await repo.count_tracked() >= self._config().wallets.max_wallets:
+            if (
+                existing is None or not existing.is_tracked
+            ) and await repo.count_tracked() >= self._config().wallets.max_wallets:
                 raise ValueError(f"límite de wallets alcanzado ({self._config().wallets.max_wallets})")
             _, created = await repo.upsert(address, label=label, list_type=list_type, notes=notes)
         return created
@@ -137,8 +150,11 @@ class WalletCollector:
         async with self._backfill_sem:
             try:
                 swaps = await self.history.fetch_swaps(
-                    address, since=since, max_signatures=cfg.providers.solana.backfill_max_signatures_per_wallet,
-                    source=TxSource.BACKFILL)
+                    address,
+                    since=since,
+                    max_signatures=cfg.providers.solana.backfill_max_signatures_per_wallet,
+                    source=TxSource.BACKFILL,
+                )
             except CopyTraderError as exc:
                 log.warning("backfill_failed", wallet=address, error=str(exc))
                 return 0
@@ -154,8 +170,7 @@ class WalletCollector:
     async def backfill_all(self, *, force: bool = False) -> dict[str, int]:
         async with self.db.session() as s:
             wallets = [w.address for w in await WalletRepo(s).list()]
-        results = await asyncio.gather(*(self.backfill(a, force=force) for a in wallets),
-                                       return_exceptions=True)
+        results = await asyncio.gather(*(self.backfill(a, force=force) for a in wallets), return_exceptions=True)
         out: dict[str, int] = {}
         for address, result in zip(wallets, results, strict=True):
             if isinstance(result, BaseException):
@@ -168,7 +183,7 @@ class WalletCollector:
     async def refresh_tokens(self, mints: Iterable[str], batch: int = 30) -> None:
         mints = sorted(set(mints))
         for i in range(0, len(mints), batch):
-            chunk = mints[i:i + batch]
+            chunk = mints[i : i + batch]
             try:
                 infos = await self.tokens.get_many(chunk)
             except CopyTraderError as exc:

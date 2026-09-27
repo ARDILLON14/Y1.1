@@ -63,8 +63,15 @@ class AlertRepo:
         await self.s.flush()
         return alert
 
-    async def list(self, *, limit: int = 100, type_: str | None = None, severity: str | None = None,
-                   unacknowledged: bool = False, before_id: int | None = None) -> Sequence[Alert]:
+    async def list(
+        self,
+        *,
+        limit: int = 100,
+        type_: str | None = None,
+        severity: str | None = None,
+        unacknowledged: bool = False,
+        before_id: int | None = None,
+    ) -> Sequence[Alert]:
         stmt = select(Alert).order_by(Alert.id.desc()).limit(limit)
         if type_:
             stmt = stmt.where(Alert.type == type_)
@@ -88,8 +95,14 @@ class AuditRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.s = session
 
-    async def add(self, actor: str, action: str, target: str | None = None,
-                  data: dict[str, Any] | None = None, ip: str | None = None) -> None:
+    async def add(
+        self,
+        actor: str,
+        action: str,
+        target: str | None = None,
+        data: dict[str, Any] | None = None,
+        ip: str | None = None,
+    ) -> None:
         self.s.add(AuditLog(actor=actor, action=action, target=target, data=data or {}, ip=ip, ts=utcnow()))
 
     async def list(self, limit: int = 200) -> Sequence[AuditLog]:
@@ -100,10 +113,18 @@ class EventLogRepo:
     def __init__(self, session: AsyncSession) -> None:
         self.s = session
 
-    async def add(self, component: str, event: str, *, level: str = "info", trace_id: str | None = None,
-                  data: dict[str, Any] | None = None) -> None:
-        self.s.add(EventLog(component=component, event=event, level=level, trace_id=trace_id,
-                            data=data or {}, ts=utcnow()))
+    async def add(
+        self,
+        component: str,
+        event: str,
+        *,
+        level: str = "info",
+        trace_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        self.s.add(
+            EventLog(component=component, event=event, level=level, trace_id=trace_id, data=data or {}, ts=utcnow())
+        )
 
     async def by_trace(self, trace_id: str) -> Sequence[EventLog]:
         stmt = select(EventLog).where(EventLog.trace_id == trace_id).order_by(EventLog.id)
@@ -163,31 +184,50 @@ class DbConfigStore:
 
     async def load_latest(self) -> ConfigVersion | None:
         async with self.db.session() as s:
-            row = (await s.execute(select(ConfigVersionRow).order_by(ConfigVersionRow.version.desc())
-                                   .limit(1))).scalar_one_or_none()
+            row = (
+                await s.execute(select(ConfigVersionRow).order_by(ConfigVersionRow.version.desc()).limit(1))
+            ).scalar_one_or_none()
             return _to_version(row) if row else None
 
     async def save(self, version: ConfigVersion) -> None:
         async with self.db.session() as s:
-            new_id = await insert_ignore(s, ConfigVersionRow, {
-                "version": version.version, "overrides": version.overrides, "author": version.author,
-                "comment": version.comment, "created_at": utcnow()}, ["version"])
+            new_id = await insert_ignore(
+                s,
+                ConfigVersionRow,
+                {
+                    "version": version.version,
+                    "overrides": version.overrides,
+                    "author": version.author,
+                    "comment": version.comment,
+                    "created_at": utcnow(),
+                },
+                ["version"],
+            )
             if new_id is None:
                 raise RuntimeError(f"config version {version.version} already exists (concurrent edit?)")
 
     async def get(self, version: int) -> ConfigVersion | None:
         async with self.db.session() as s:
-            row = (await s.execute(select(ConfigVersionRow).where(ConfigVersionRow.version == version))
-                   ).scalar_one_or_none()
+            row = (
+                await s.execute(select(ConfigVersionRow).where(ConfigVersionRow.version == version))
+            ).scalar_one_or_none()
             return _to_version(row) if row else None
 
     async def history(self, limit: int = 50) -> list[ConfigVersion]:
         async with self.db.session() as s:
-            rows = (await s.execute(select(ConfigVersionRow).order_by(ConfigVersionRow.version.desc())
-                                    .limit(limit))).scalars().all()
+            rows = (
+                (await s.execute(select(ConfigVersionRow).order_by(ConfigVersionRow.version.desc()).limit(limit)))
+                .scalars()
+                .all()
+            )
             return [_to_version(r) for r in rows]
 
 
 def _to_version(row: ConfigVersionRow) -> ConfigVersion:
-    return ConfigVersion(version=row.version, overrides=dict(row.overrides), author=row.author,
-                         comment=row.comment, created_at=row.created_at)
+    return ConfigVersion(
+        version=row.version,
+        overrides=dict(row.overrides),
+        author=row.author,
+        comment=row.comment,
+        created_at=row.created_at,
+    )

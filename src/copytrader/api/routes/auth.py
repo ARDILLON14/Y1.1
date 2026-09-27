@@ -25,8 +25,7 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict[s
     ip = client_ip(request)
     c.auth.guard.check(ip)
     if not await c.auth.any_user():
-        raise HTTPException(status_code=409,
-                            detail="no hay usuario: ejecuta 'copytrader set-password' en el servidor")
+        raise HTTPException(status_code=409, detail="no hay usuario: ejecuta 'copytrader set-password' en el servidor")
     try:
         await c.auth.verify(body.username, body.password, body.totp)
     except AuthError:
@@ -37,8 +36,15 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict[s
     c.auth.guard.success(ip)
     sess = c.auth.sessions.create(body.username, ip)
     cfg = c.container.cfg.api
-    response.set_cookie(SESSION_COOKIE, sess.id, httponly=True, secure=cfg.secure_cookies, samesite="strict",
-                        max_age=cfg.session_ttl_minutes * 60, path="/")
+    response.set_cookie(
+        SESSION_COOKIE,
+        sess.id,
+        httponly=True,
+        secure=cfg.secure_cookies,
+        samesite="strict",
+        max_age=cfg.session_ttl_minutes * 60,
+        path="/",
+    )
     async with c.container.db.session() as s:
         await AuditRepo(s).add(body.username, "login", None, {}, ip)
     return {"username": sess.username, "csrf": sess.csrf}

@@ -30,9 +30,15 @@ class SwapFeed(Protocol):
 
 
 class HistorySource(Protocol):
-    async def fetch_swaps(self, wallet: str, *, since: datetime | None = None,
-                          until_signature: str | None = None, max_signatures: int = 1000,
-                          source: TxSource = TxSource.BACKFILL) -> list[SwapEvent]: ...
+    async def fetch_swaps(
+        self,
+        wallet: str,
+        *,
+        since: datetime | None = None,
+        until_signature: str | None = None,
+        max_signatures: int = 1000,
+        source: TxSource = TxSource.BACKFILL,
+    ) -> list[SwapEvent]: ...
 
 
 @dataclass(slots=True)
@@ -93,8 +99,7 @@ class SolPriceHistory(Protocol):
 
 
 class QuoteSource(Protocol):
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int,
-                    slippage_bps: int) -> Quote: ...
+    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,8 +110,15 @@ class BuiltTransaction:
 
 
 class SwapTxBuilder(Protocol):
-    async def build_swap(self, quote: Quote, user_public_key: str, *, priority_max_lamports: int,
-                         priority_level: str, jito_tip_lamports: int = 0) -> BuiltTransaction: ...
+    async def build_swap(
+        self,
+        quote: Quote,
+        user_public_key: str,
+        *,
+        priority_max_lamports: int,
+        priority_level: str,
+        jito_tip_lamports: int = 0,
+    ) -> BuiltTransaction: ...
 
 
 class ChainClient(Protocol):
@@ -116,8 +128,7 @@ class ChainClient(Protocol):
 
     async def get_block_height(self) -> int: ...
 
-    async def get_transaction(self, signature: str, *, commitment: str | None = None
-                              ) -> dict[str, Any] | None: ...
+    async def get_transaction(self, signature: str, *, commitment: str | None = None) -> dict[str, Any] | None: ...
 
     async def get_balance(self, address: str) -> int: ...
 
@@ -133,7 +144,6 @@ class TokenInfoProvider(Protocol):
 
     async def get_many(self, mints: Sequence[str]) -> dict[str, TokenInfo]: ...
 
-    async def prices(self, mints: Sequence[str], *, max_age_seconds: float | None = None
-                     ) -> dict[str, float]: ...
+    async def prices(self, mints: Sequence[str], *, max_age_seconds: float | None = None) -> dict[str, float]: ...
 
     async def sol_price(self) -> float | None: ...

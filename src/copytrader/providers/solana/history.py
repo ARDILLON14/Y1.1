@@ -24,22 +24,29 @@ log = structlog.get_logger(__name__)
 
 
 class RpcHistorySource:
-    def __init__(self, rpc: SolanaRpc, sol_prices: SolPriceHistory, *, quote_mints: list[str],
-                 concurrency: int = 4, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        rpc: SolanaRpc,
+        sol_prices: SolPriceHistory,
+        *,
+        quote_mints: list[str],
+        concurrency: int = 4,
+        clock: Clock | None = None,
+    ) -> None:
         self.rpc = rpc
         self.sol_prices = sol_prices
         self.quote_mints = quote_mints
         self._sem = asyncio.Semaphore(concurrency)
         self.clock = clock or SystemClock()
 
-    async def list_signatures(self, wallet: str, *, since: datetime | None, until_signature: str | None,
-                              max_signatures: int) -> list[dict[str, Any]]:
+    async def list_signatures(
+        self, wallet: str, *, since: datetime | None, until_signature: str | None, max_signatures: int
+    ) -> list[dict[str, Any]]:
         collected: list[dict[str, Any]] = []
         before: str | None = None
         while len(collected) < max_signatures:
             limit = min(1000, max_signatures - len(collected))
-            batch = await self.rpc.get_signatures_for_address(wallet, before=before, until=until_signature,
-                                                              limit=limit)
+            batch = await self.rpc.get_signatures_for_address(wallet, before=before, until=until_signature, limit=limit)
             if not batch:
                 break
             stop = False
@@ -55,11 +62,18 @@ class RpcHistorySource:
                 break
         return collected
 
-    async def fetch_swaps(self, wallet: str, *, since: datetime | None = None,
-                          until_signature: str | None = None, max_signatures: int = 1000,
-                          source: TxSource = TxSource.BACKFILL) -> list[SwapEvent]:
-        sigs = await self.list_signatures(wallet, since=since, until_signature=until_signature,
-                                          max_signatures=max_signatures)
+    async def fetch_swaps(
+        self,
+        wallet: str,
+        *,
+        since: datetime | None = None,
+        until_signature: str | None = None,
+        max_signatures: int = 1000,
+        source: TxSource = TxSource.BACKFILL,
+    ) -> list[SwapEvent]:
+        sigs = await self.list_signatures(
+            wallet, since=since, until_signature=until_signature, max_signatures=max_signatures
+        )
         now = self.clock.now()
 
         async def one(item: dict[str, Any]) -> list[SwapEvent]:
@@ -74,8 +88,14 @@ class RpcHistorySource:
             bt = tx.get("blockTime")
             sol_price = await self.sol_prices.sol_price_at(from_unix(bt)) if bt else None
             try:
-                return parse_swaps(tx, wallet, sol_price_usd=sol_price, quote_mints=self.quote_mints,
-                                   source=source, detected_at=now if source is TxSource.CATCHUP else None)
+                return parse_swaps(
+                    tx,
+                    wallet,
+                    sol_price_usd=sol_price,
+                    quote_mints=self.quote_mints,
+                    source=source,
+                    detected_at=now if source is TxSource.CATCHUP else None,
+                )
             except CopyTraderError as exc:
                 log.warning("history_parse_failed", wallet=wallet, signature=item["signature"], error=str(exc))
                 return []

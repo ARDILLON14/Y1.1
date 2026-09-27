@@ -50,8 +50,7 @@ class NullSigner:
         return False
 
 
-def sign_with_keypair(keypair: Any, tx_bytes: bytes, policy: SignerPolicy,
-                      intent: SignIntent) -> SignedTransaction:
+def sign_with_keypair(keypair: Any, tx_bytes: bytes, policy: SignerPolicy, intent: SignIntent) -> SignedTransaction:
     from solders.transaction import VersionedTransaction
 
     tx = VersionedTransaction.from_bytes(tx_bytes)
@@ -78,9 +77,16 @@ class LocalSigner:
 
 
 class RemoteSigner:
-    def __init__(self, base_url: str, hmac_key: bytes, *, expected_pubkey: str | None,
-                 timeout: float = 5.0, client: httpx.AsyncClient | None = None,
-                 local_policy: SignerPolicy | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        hmac_key: bytes,
+        *,
+        expected_pubkey: str | None,
+        timeout: float = 5.0,
+        client: httpx.AsyncClient | None = None,
+        local_policy: SignerPolicy | None = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._key = hmac_key
         self._expected = expected_pubkey
@@ -115,8 +121,9 @@ class RemoteSigner:
             violations = self._policy.inspect(VersionedTransaction.from_bytes(tx_bytes), intent)
             if violations:
                 raise SignerPolicyViolation("; ".join(violations))
-        data = await self._call("POST", "/v1/sign", {
-            "tx": base64.b64encode(tx_bytes).decode(), "intent": intent.to_dict()})
+        data = await self._call(
+            "POST", "/v1/sign", {"tx": base64.b64encode(tx_bytes).decode(), "intent": intent.to_dict()}
+        )
         signed = base64.b64decode(data["tx"])
         from solders.transaction import VersionedTransaction
 

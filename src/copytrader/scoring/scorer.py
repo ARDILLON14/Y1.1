@@ -72,29 +72,41 @@ def compute_components(m: WalletMetrics, b: ScoringBounds, k: float) -> dict[str
         {"expectancy_lb_pct": m.expectancy_lb_pct, "roi_pct": m.roi_pct},
     )
     comps["consistency"] = (
-        _mean([norm01(m.profitable_weeks_frac, 0.2, b.profitable_weeks_hi),
-               norm01(m.profitable_days_frac, 0.2, 0.7)]),
+        _mean([norm01(m.profitable_weeks_frac, 0.2, b.profitable_weeks_hi), norm01(m.profitable_days_frac, 0.2, 0.7)]),
         {"profitable_weeks": m.profitable_weeks_frac, "profitable_days": m.profitable_days_frac},
     )
-    comps["drawdown"] = (norm01(m.max_drawdown_pct, 0.0, b.drawdown_max_pct, invert=True),
-                         {"max_drawdown_pct": m.max_drawdown_pct})
-    comps["win_rate"] = (norm01(m.win_rate_lb, b.win_rate_lo, b.win_rate_hi),
-                         {"win_rate": m.win_rate, "win_rate_lb": m.win_rate_lb})
+    comps["drawdown"] = (
+        norm01(m.max_drawdown_pct, 0.0, b.drawdown_max_pct, invert=True),
+        {"max_drawdown_pct": m.max_drawdown_pct},
+    )
+    comps["win_rate"] = (
+        norm01(m.win_rate_lb, b.win_rate_lo, b.win_rate_hi),
+        {"win_rate": m.win_rate, "win_rate_lb": m.win_rate_lb},
+    )
     pf = m.profit_factor_shrunk
     comps["profit_factor"] = (
         None if pf is None else clip(math.log(max(pf, 1e-9)) / math.log(b.profit_factor_hi)),
         {"profit_factor": m.profit_factor, "profit_factor_shrunk": pf},
     )
     comps["risk"] = (
-        _mean([norm01(m.avg_loss_pct, 0.0, b.avg_loss_hi_pct, invert=True),
-               None if m.worst_trade_pct is None else norm01(-m.worst_trade_pct, 0.0, b.worst_loss_hi_pct,
-                                                             invert=True)]),
+        _mean(
+            [
+                norm01(m.avg_loss_pct, 0.0, b.avg_loss_hi_pct, invert=True),
+                None
+                if m.worst_trade_pct is None
+                else norm01(-m.worst_trade_pct, 0.0, b.worst_loss_hi_pct, invert=True),
+            ]
+        ),
         {"avg_loss_pct": m.avg_loss_pct, "worst_trade_pct": m.worst_trade_pct},
     )
-    comps["volatility"] = (norm01(m.return_std_pct, 0.0, b.return_std_hi_pct, invert=True),
-                           {"return_std_pct": m.return_std_pct})
-    comps["sample_size"] = (1 - math.exp(-m.n_effective / k) if m.n_closed_trades else 0.0,
-                            {"n_trades": m.n_closed_trades, "n_effective": round(m.n_effective, 1)})
+    comps["volatility"] = (
+        norm01(m.return_std_pct, 0.0, b.return_std_hi_pct, invert=True),
+        {"return_std_pct": m.return_std_pct},
+    )
+    comps["sample_size"] = (
+        1 - math.exp(-m.n_effective / k) if m.n_closed_trades else 0.0,
+        {"n_trades": m.n_closed_trades, "n_effective": round(m.n_effective, 1)},
+    )
     recency = norm01(m.days_since_last_trade, 0.0, b.inactive_days_zero, invert=True)
     tpd = m.trades_per_day
     if tpd is None:
@@ -103,8 +115,7 @@ def compute_components(m: WalletMetrics, b: ScoringBounds, k: float) -> dict[str
         freq = norm01(tpd, b.trades_per_day_max, 3 * b.trades_per_day_max, invert=True)
     else:
         freq = clip(tpd / 0.1)
-    comps["activity"] = (_mean([recency, freq]), {"days_since_last": m.days_since_last_trade,
-                                                  "trades_per_day": tpd})
+    comps["activity"] = (_mean([recency, freq]), {"days_since_last": m.days_since_last_trade, "trades_per_day": tpd})
     top = m.concentration.get("top_trade_share")
     hhi = m.concentration.get("token_hhi")
     comps["concentration"] = (
@@ -172,17 +183,31 @@ class ScoringEngine:
         score -= applied
         if any(f.severity is Severity.CRITICAL for f in flags):
             if score > CRITICAL_SCORE_CAP:
-                penalties.append({"code": "CRITICAL_CAP", "points": round(score - CRITICAL_SCORE_CAP, 2),
-                                  "reason": "Flag crítico: score limitado"})
+                penalties.append(
+                    {
+                        "code": "CRITICAL_CAP",
+                        "points": round(score - CRITICAL_SCORE_CAP, 2),
+                        "reason": "Flag crítico: score limitado",
+                    }
+                )
             score = min(score, CRITICAL_SCORE_CAP)
         weights = cfg.weights.model_dump()
         components = {
-            name: {"label": COMPONENT_LABELS.get(name, name), "value": None if v is None else round(v, 4),
-                   "weight": weights.get(name, 0.0), "input": inp}
+            name: {
+                "label": COMPONENT_LABELS.get(name, name),
+                "value": None if v is None else round(v, 4),
+                "weight": weights.get(name, 0.0),
+                "input": inp,
+            }
             for name, (v, inp) in comps_hist.items()
         }
-        return ScoreResult(score=round(clip(score, 0.0, 100.0), 2), score_hist=round(hist, 2),
-                           score_recent=None if recent is None else round(recent, 2),
-                           raw_hist=None if raw_hist is None else round(raw_hist, 2),
-                           confidence=round(confidence, 4), components=components, penalties=penalties,
-                           recent_weight=round(w_recent, 3))
+        return ScoreResult(
+            score=round(clip(score, 0.0, 100.0), 2),
+            score_hist=round(hist, 2),
+            score_recent=None if recent is None else round(recent, 2),
+            raw_hist=None if raw_hist is None else round(raw_hist, 2),
+            confidence=round(confidence, 4),
+            components=components,
+            penalties=penalties,
+            recent_weight=round(w_recent, 3),
+        )

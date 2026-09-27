@@ -25,13 +25,33 @@ from typing import Any
 REDACTED = "[REDACTED]"
 
 _SENSITIVE_KEYS = {
-    "password", "passphrase", "secret", "secret_key", "private_key", "privkey", "seed",
-    "mnemonic", "api_key", "apikey", "api-key", "authorization", "cookie", "set-cookie",
-    "bot_token", "webhook_url", "hmac_key", "keypair", "x-signature", "totp", "totp_secret",
-    "session", "csrf_token", "x-csrf-token", "x-api-key",
+    "password",
+    "passphrase",
+    "secret",
+    "secret_key",
+    "private_key",
+    "privkey",
+    "seed",
+    "mnemonic",
+    "api_key",
+    "apikey",
+    "api-key",
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "bot_token",
+    "webhook_url",
+    "hmac_key",
+    "keypair",
+    "x-signature",
+    "totp",
+    "totp_secret",
+    "session",
+    "csrf_token",
+    "x-csrf-token",
+    "x-api-key",
 }
-_SENSITIVE_SUFFIXES = ("_secret", "_password", "_passphrase", "_private_key", "_api_key",
-                       "_hmac_key", "_bot_token")
+_SENSITIVE_SUFFIXES = ("_secret", "_password", "_passphrase", "_private_key", "_api_key", "_hmac_key", "_bot_token")
 
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Solana keypair file format: JSON array of 64 small ints
@@ -92,8 +112,11 @@ class Redactor:
             return self.text(value)
         if isinstance(value, Mapping):
             return {
-                k: (REDACTED if isinstance(k, str) and _is_sensitive_key(k) and v not in (None, "")
-                    else self.data(v, _depth + 1))
+                k: (
+                    REDACTED
+                    if isinstance(k, str) and _is_sensitive_key(k) and v not in (None, "")
+                    else self.data(v, _depth + 1)
+                )
                 for k, v in value.items()
             }
         if isinstance(value, (list, tuple)):

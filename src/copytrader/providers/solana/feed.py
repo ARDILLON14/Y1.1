@@ -27,7 +27,7 @@ from copytrader.providers.interfaces import SwapHandler
 from copytrader.providers.solana.history import RpcHistorySource
 from copytrader.providers.solana.parser import parse_swaps
 from copytrader.providers.solana.rpc import SolanaRpc
-from copytrader.providers.solana.ws import ReconnectingStream, StreamNotice
+from copytrader.providers.solana.ws import HeliusTransactionStream, LogsSubscribeStream, StreamNotice
 
 log = structlog.get_logger(__name__)
 
@@ -38,7 +38,7 @@ SolPriceFn = Callable[[], Awaitable[float | None]]
 class SolanaSwapFeed:
     def __init__(
         self,
-        stream: ReconnectingStream,
+        stream: LogsSubscribeStream | HeliusTransactionStream,
         rpc: SolanaRpc,
         history: RpcHistorySource,
         *,
@@ -70,7 +70,7 @@ class SolanaSwapFeed:
         self._tasks: list[asyncio.Task[None]] = []
         self._stopped = asyncio.Event()
         self._catchup_lock = asyncio.Lock()
-        stream._on_reconnect = self.catch_up  # noqa: SLF001 (wire reconnect hook)
+        stream._on_reconnect = self.catch_up
 
     def set_wallets(self, wallets: set[str]) -> None:
         self._wallets = set(wallets)
@@ -139,9 +139,15 @@ class SolanaSwapFeed:
         wallets += [w for w in self._wallets_in(tx) if w != notice.wallet]
         for wallet in wallets:
             try:
-                swaps = parse_swaps(tx, wallet, sol_price_usd=sol_price, quote_mints=self.quote_mints,
-                                    source=TxSource.STREAM, detected_at=notice.received_at,
-                                    fallback_time=notice.received_at)
+                swaps = parse_swaps(
+                    tx,
+                    wallet,
+                    sol_price_usd=sol_price,
+                    quote_mints=self.quote_mints,
+                    source=TxSource.STREAM,
+                    detected_at=notice.received_at,
+                    fallback_time=notice.received_at,
+                )
             except CopyTraderError as exc:
                 log.warning("parse_failed", signature=notice.signature, error=str(exc))
                 continue
@@ -172,8 +178,12 @@ class SolanaSwapFeed:
                 try:
                     cursor = await self._cursor(wallet)
                     swaps = await self.history.fetch_swaps(
-                        wallet, since=None if cursor else since, until_signature=cursor,
-                        max_signatures=200, source=TxSource.CATCHUP)
+                        wallet,
+                        since=None if cursor else since,
+                        until_signature=cursor,
+                        max_signatures=200,
+                        source=TxSource.CATCHUP,
+                    )
                 except CopyTraderError as exc:
                     log.warning("catchup_failed", wallet=wallet, error=str(exc))
                     continue

@@ -26,13 +26,12 @@ class SolanaRpc:
         self.commitment = commitment
         self._ids = itertools.count(1)
 
-    async def call(self, method: str, params: list[Any] | None = None, *,
-                   retry: RetryPolicy | None = None) -> Any:
+    async def call(self, method: str, params: list[Any] | None = None, *, retry: RetryPolicy | None = None) -> Any:
         payload = {"jsonrpc": "2.0", "id": next(self._ids), "method": method, "params": params or []}
         data = await self.http.post_json(self.url, json=payload, retry=retry)
         if not isinstance(data, dict):
             raise RpcError(f"{method}: invalid response", provider="solana_rpc")
-        if "error" in data and data["error"]:
+        if data.get("error"):
             err = data["error"]
             code = err.get("code") if isinstance(err, dict) else None
             message = err.get("message") if isinstance(err, dict) else str(err)
@@ -43,12 +42,21 @@ class SolanaRpc:
 
     # ------------------------------------------------------------------ reads
     async def get_transaction(self, signature: str, *, commitment: str | None = None) -> dict[str, Any] | None:
-        return await self.call("getTransaction", [signature, {
-            "encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
-            "commitment": commitment or self.commitment}])
+        return await self.call(
+            "getTransaction",
+            [
+                signature,
+                {
+                    "encoding": "jsonParsed",
+                    "maxSupportedTransactionVersion": 0,
+                    "commitment": commitment or self.commitment,
+                },
+            ],
+        )
 
-    async def get_signatures_for_address(self, address: str, *, before: str | None = None,
-                                         until: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
+    async def get_signatures_for_address(
+        self, address: str, *, before: str | None = None, until: str | None = None, limit: int = 1000
+    ) -> list[dict[str, Any]]:
         opts: dict[str, Any] = {"limit": min(limit, 1000), "commitment": self.commitment}
         if before:
             opts["before"] = before
@@ -57,8 +65,7 @@ class SolanaRpc:
         return list(await self.call("getSignaturesForAddress", [address, opts]) or [])
 
     async def get_account_info(self, address: str) -> dict[str, Any] | None:
-        result = await self.call("getAccountInfo", [address, {"encoding": "jsonParsed",
-                                                              "commitment": self.commitment}])
+        result = await self.call("getAccountInfo", [address, {"encoding": "jsonParsed", "commitment": self.commitment}])
         return (result or {}).get("value")
 
     async def get_balance(self, address: str) -> int:
@@ -69,8 +76,10 @@ class SolanaRpc:
         """Raw token balances by mint for all token accounts of ``owner``."""
         balances: dict[str, int] = {}
         for program in (TOKEN_PROGRAM, TOKEN_2022_PROGRAM):
-            result = await self.call("getTokenAccountsByOwner", [
-                owner, {"programId": program}, {"encoding": "jsonParsed", "commitment": self.commitment}])
+            result = await self.call(
+                "getTokenAccountsByOwner",
+                [owner, {"programId": program}, {"encoding": "jsonParsed", "commitment": self.commitment}],
+            )
             for acc in (result or {}).get("value", []):
                 info = acc["account"]["data"]["parsed"]["info"]
                 mint = info["mint"]
@@ -91,14 +100,25 @@ class SolanaRpc:
             return False
 
     async def get_signature_statuses(self, signatures: Sequence[str]) -> list[dict[str, Any] | None]:
-        result = await self.call("getSignatureStatuses", [list(signatures),
-                                                          {"searchTransactionHistory": True}])
+        result = await self.call("getSignatureStatuses", [list(signatures), {"searchTransactionHistory": True}])
         return list((result or {}).get("value", []))
 
     # ----------------------------------------------------------------- writes
     async def send_raw_transaction(self, tx_bytes: bytes, *, skip_preflight: bool = True) -> str:
         """Send a signed transaction. Re-sending the same bytes is idempotent on Solana."""
         encoded = base64.b64encode(tx_bytes).decode()
-        return str(await self.call("sendTransaction", [encoded, {
-            "encoding": "base64", "skipPreflight": skip_preflight, "maxRetries": 0,
-            "preflightCommitment": self.commitment}], retry=_NO_RETRY))
+        return str(
+            await self.call(
+                "sendTransaction",
+                [
+                    encoded,
+                    {
+                        "encoding": "base64",
+                        "skipPreflight": skip_preflight,
+                        "maxRetries": 0,
+                        "preflightCommitment": self.commitment,
+                    },
+                ],
+                retry=_NO_RETRY,
+            )
+        )

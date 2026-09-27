@@ -74,8 +74,11 @@ def reconstruct(
         cyc = cycles.get(sw.token_mint)
         if sw.side is Side.BUY:
             if cyc is None:
-                cyc = _Cycle(opened_at=sw.block_time, entry_price_usd=sw.value_usd / sw.token_amount,
-                             liquidity_at_entry=sw.liquidity_usd)
+                cyc = _Cycle(
+                    opened_at=sw.block_time,
+                    entry_price_usd=sw.value_usd / sw.token_amount,
+                    liquidity_at_entry=sw.liquidity_usd,
+                )
                 cycles[sw.token_mint] = cyc
             cyc.qty += sw.token_amount
             cyc.cost += sw.value_usd
@@ -105,24 +108,39 @@ def reconstruct(
         if cyc.qty <= dust_fraction * cyc.max_qty:
             deployed = max(0.0, deployed - cyc.cost)
             pnl = cyc.proceeds - cyc.cycle_cost
-            result.closed.append(ClosedTrade(
-                wallet=wallet, token_mint=sw.token_mint, opened_at=cyc.opened_at, closed_at=sw.block_time,
-                cost_usd=cyc.cycle_cost, proceeds_usd=cyc.proceeds, pnl_usd=pnl,
-                return_frac=pnl / cyc.cycle_cost if cyc.cycle_cost > 0 else 0.0,
-                holding_seconds=(sw.block_time - cyc.opened_at).total_seconds(),
-                n_buys=cyc.n_buys, n_sells=cyc.n_sells, entry_price_usd=cyc.entry_price_usd,
-                category=category_of(sw.token_mint) if category_of else None,
-                liquidity_at_entry_usd=cyc.liquidity_at_entry,
-                regime=regime_of(cyc.opened_at) if regime_of else None,
-            ))
+            result.closed.append(
+                ClosedTrade(
+                    wallet=wallet,
+                    token_mint=sw.token_mint,
+                    opened_at=cyc.opened_at,
+                    closed_at=sw.block_time,
+                    cost_usd=cyc.cycle_cost,
+                    proceeds_usd=cyc.proceeds,
+                    pnl_usd=pnl,
+                    return_frac=pnl / cyc.cycle_cost if cyc.cycle_cost > 0 else 0.0,
+                    holding_seconds=(sw.block_time - cyc.opened_at).total_seconds(),
+                    n_buys=cyc.n_buys,
+                    n_sells=cyc.n_sells,
+                    entry_price_usd=cyc.entry_price_usd,
+                    category=category_of(sw.token_mint) if category_of else None,
+                    liquidity_at_entry_usd=cyc.liquidity_at_entry,
+                    regime=regime_of(cyc.opened_at) if regime_of else None,
+                )
+            )
             del cycles[sw.token_mint]
 
     for mint, cyc in cycles.items():
         if cyc.qty > 0:
-            result.open_lots.append(OpenLot(
-                wallet=wallet, token_mint=mint, qty=cyc.qty, cost_usd=cyc.cost, opened_at=cyc.opened_at,
-                last_trade_at=cyc.last_trade_at or cyc.opened_at,
-                stale=bool(stale_before and (cyc.last_trade_at or cyc.opened_at) < stale_before),
-            ))
+            result.open_lots.append(
+                OpenLot(
+                    wallet=wallet,
+                    token_mint=mint,
+                    qty=cyc.qty,
+                    cost_usd=cyc.cost,
+                    opened_at=cyc.opened_at,
+                    last_trade_at=cyc.last_trade_at or cyc.opened_at,
+                    stale=bool(stale_before and (cyc.last_trade_at or cyc.opened_at) < stale_before),
+                )
+            )
     result.closed.sort(key=lambda t: t.closed_at)
     return result

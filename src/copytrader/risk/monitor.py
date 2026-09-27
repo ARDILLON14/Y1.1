@@ -22,8 +22,9 @@ log = structlog.get_logger(__name__)
 
 
 class RiskMonitor:
-    def __init__(self, *, db: Database, clock: Clock, config: Callable[[], AppConfig], risk: RiskEngine,
-                 mode: ModeController) -> None:
+    def __init__(
+        self, *, db: Database, clock: Clock, config: Callable[[], AppConfig], risk: RiskEngine, mode: ModeController
+    ) -> None:
         self.db = db
         self.clock = clock
         self._config = config
@@ -40,15 +41,25 @@ class RiskMonitor:
         if active is not None:
             modes.add(active)
         for mode in sorted(modes, key=lambda m: m.value):
-            book = (await self.risk.enforce_limits(mode) if mode is active
-                    else await self.risk.book(mode, include_reservations=False))
+            book = (
+                await self.risk.enforce_limits(mode)
+                if mode is active
+                else await self.risk.book(mode, include_reservations=False)
+            )
             self.last_books[mode] = book
             async with self.db.session() as s:
-                await EquityRepo(s).add(EquitySnapshot(
-                    ts=self.clock.now(), mode=mode.value, equity_usd=book.equity_usd,
-                    cash_usd=book.equity_usd - book.exposure_usd, exposure_usd=book.exposure_usd,
-                    realized_pnl_usd=book.realized_total_usd, unrealized_pnl_usd=book.unrealized_usd,
-                    drawdown_pct=book.drawdown_pct))
+                await EquityRepo(s).add(
+                    EquitySnapshot(
+                        ts=self.clock.now(),
+                        mode=mode.value,
+                        equity_usd=book.equity_usd,
+                        cash_usd=book.equity_usd - book.exposure_usd,
+                        exposure_usd=book.exposure_usd,
+                        realized_pnl_usd=book.realized_total_usd,
+                        unrealized_pnl_usd=book.unrealized_usd,
+                        drawdown_pct=book.drawdown_pct,
+                    )
+                )
             metrics.EQUITY.labels(mode=mode.value).set(book.equity_usd)
             metrics.EXPOSURE.labels(mode=mode.value).set(book.exposure_usd)
             metrics.DAILY_PNL.labels(mode=mode.value).set(book.equity_usd - book.day_start_equity)
@@ -61,8 +72,9 @@ class RiskMonitor:
                 metrics.ERRORS.labels(component="risk_monitor").inc()
                 log.exception("risk_monitor_failed")
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stopped.wait(),
-                                       timeout=self._config().observability.equity_snapshot_seconds)
+                await asyncio.wait_for(
+                    self._stopped.wait(), timeout=self._config().observability.equity_snapshot_seconds
+                )
 
     async def stop(self) -> None:
         self._stopped.set()

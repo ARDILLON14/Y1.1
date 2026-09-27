@@ -1,18 +1,18 @@
 """Command line interface.
 
-    copytrader run                       start the whole system
-    copytrader init-db                   create/upgrade the database schema
-    copytrader set-password              create/update the dashboard user
-    copytrader totp-setup                enable TOTP 2FA for the dashboard user
-    copytrader gen-secret                print strong random secrets
-    copytrader keystore create|rotate    manage the encrypted bot keypair
-    copytrader wallets add|import|list   manage tracked wallets
-    copytrader backfill [--force]        download wallet history
-    copytrader evaluate                  run one analysis/scoring/selection cycle
-    copytrader backtest                  walk-forward backtest on stored history
-    copytrader preflight                 checks required before real trading
-    copytrader check-config              validate and summarise the configuration
-    copytrader kill-switch on|off        manual kill switch
+copytrader run                       start the whole system
+copytrader init-db                   create/upgrade the database schema
+copytrader set-password              create/update the dashboard user
+copytrader totp-setup                enable TOTP 2FA for the dashboard user
+copytrader gen-secret                print strong random secrets
+copytrader keystore create|rotate    manage the encrypted bot keypair
+copytrader wallets add|import|list   manage tracked wallets
+copytrader backfill [--force]        download wallet history
+copytrader evaluate                  run one analysis/scoring/selection cycle
+copytrader backtest                  walk-forward backtest on stored history
+copytrader preflight                 checks required before real trading
+copytrader check-config              validate and summarise the configuration
+copytrader kill-switch on|off        manual kill switch
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ async def cmd_run(args: argparse.Namespace) -> int:
     from copytrader.app import Application
 
     try:
-        import uvloop  # type: ignore[import-not-found]
+        import uvloop
 
         uvloop.install()
     except ImportError:
@@ -188,20 +188,25 @@ async def cmd_wallets(args: argparse.Namespace) -> int:
     c = await _container(args)
     try:
         if args.wallets_action == "add":
-            created = await c.collector.add_wallet(args.address, label=args.label,
-                                                   list_type=parse_list_type(args.list) if args.list else None)
+            created = await c.collector.add_wallet(
+                args.address, label=args.label, list_type=parse_list_type(args.list) if args.list else None
+            )
             print("Añadida." if created else "Actualizada.")
         elif args.wallets_action == "import":
-            report = await c.collector.import_csv(Path(args.file).read_text(encoding="utf-8"))
-            print(f"Añadidas: {len(report.added)} · Actualizadas: {len(report.updated)} · "
-                  f"Errores: {len(report.errors)}")
+            text = await asyncio.to_thread(Path(args.file).read_text, encoding="utf-8")
+            report = await c.collector.import_csv(text)
+            print(
+                f"Añadidas: {len(report.added)} · Actualizadas: {len(report.updated)} · Errores: {len(report.errors)}"
+            )
             for err in report.errors:
                 print("  -", err)
         else:
             async with c.db.session() as s:
                 for w in await WalletRepo(s).list():
-                    print(f"{w.address}  {w.status:8} score={w.score if w.score is not None else '-':>6}  "
-                          f"sel={'Y' if w.selected else '-'}  list={w.list_type:9} {w.label or ''}")
+                    print(
+                        f"{w.address}  {w.status:8} score={w.score if w.score is not None else '-':>6}  "
+                        f"sel={'Y' if w.selected else '-'}  list={w.list_type:9} {w.label or ''}"
+                    )
     finally:
         await c.aclose()
     return 0
@@ -221,8 +226,10 @@ async def cmd_evaluate(args: argparse.Namespace) -> int:
     c = await _container(args)
     try:
         report = await c.cycle.run()
-        print(f"Evaluadas {report.evaluated} wallets · estados {report.status_counts} · "
-              f"seleccionadas {len(report.selected)}")
+        print(
+            f"Evaluadas {report.evaluated} wallets · estados {report.status_counts} · "
+            f"seleccionadas {len(report.selected)}"
+        )
     finally:
         await c.aclose()
     return 0
@@ -234,8 +241,15 @@ async def cmd_backtest(args: argparse.Namespace) -> int:
 
     c = await _container(args)
     try:
-        run_id = await run_backtest(c, {"train_days": args.train_days, "test_days": args.test_days,
-                                        "top_n": args.top_n, "exit_mode": args.exit_mode})
+        run_id = await run_backtest(
+            c,
+            {
+                "train_days": args.train_days,
+                "test_days": args.test_days,
+                "top_n": args.top_n,
+                "exit_mode": args.exit_mode,
+            },
+        )
         async with c.db.session() as s:
             run = await BacktestRepo(s).get(run_id)
         if run is None or run.status != "done":
@@ -243,8 +257,10 @@ async def cmd_backtest(args: argparse.Namespace) -> int:
             return 1
         print(f"Periodo: {run.results['period']['start']} → {run.results['period']['end']}")
         for name, r in run.results["results"].items():
-            print(f"  {name:9} ROI {r['roi_pct']:8.2f}%  DD {r['max_drawdown_pct']:6.2f}%  trades {r['n_trades']:5}"
-                  f"  win {r['win_rate'] or 0:.2%}  PF {r['profit_factor'] or 0:.2f}")
+            print(
+                f"  {name:9} ROI {r['roi_pct']:8.2f}%  DD {r['max_drawdown_pct']:6.2f}%  trades {r['n_trades']:5}"
+                f"  win {r['win_rate'] or 0:.2%}  PF {r['profit_factor'] or 0:.2f}"
+            )
         for note in run.results["notes"]:
             print("  *", note)
     finally:
@@ -274,10 +290,14 @@ def cmd_check_config(args: argparse.Namespace) -> int:
     raw, sec = _load(args)
     cfg = build_config(raw)
     print("Configuración válida.")
-    print(f"  Nivel máximo: {int(cfg.app.operating_level)} · proveedores: {cfg.providers.mode} · "
-          f"firmador: {cfg.security.signer_mode}")
-    print(f"  Capital: ${cfg.risk.capital_usd:,.0f} · máx. operación ${cfg.risk.max_trade_usd:,.0f} · "
-          f"pérdida diaria {cfg.risk.max_daily_loss_pct}% · posiciones {cfg.risk.max_open_positions}")
+    print(
+        f"  Nivel máximo: {int(cfg.app.operating_level)} · proveedores: {cfg.providers.mode} · "
+        f"firmador: {cfg.security.signer_mode}"
+    )
+    print(
+        f"  Capital: ${cfg.risk.capital_usd:,.0f} · máx. operación ${cfg.risk.max_trade_usd:,.0f} · "
+        f"pérdida diaria {cfg.risk.max_daily_loss_pct}% · posiciones {cfg.risk.max_open_positions}"
+    )
     print(f"  Selección: Top {cfg.selection.top_n} · score mínimo {cfg.selection.min_score}")
     configured = [n for n in type(sec).model_fields if getattr(sec, n) is not None]
     print(f"  Secretos configurados: {', '.join(configured)}")
@@ -348,9 +368,18 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-ASYNC = {"run": cmd_run, "init-db": cmd_init_db, "set-password": cmd_set_password, "totp-setup": cmd_totp_setup,
-         "wallets": cmd_wallets, "backfill": cmd_backfill, "evaluate": cmd_evaluate, "backtest": cmd_backtest,
-         "preflight": cmd_preflight, "kill-switch": cmd_kill}
+ASYNC = {
+    "run": cmd_run,
+    "init-db": cmd_init_db,
+    "set-password": cmd_set_password,
+    "totp-setup": cmd_totp_setup,
+    "wallets": cmd_wallets,
+    "backfill": cmd_backfill,
+    "evaluate": cmd_evaluate,
+    "backtest": cmd_backtest,
+    "preflight": cmd_preflight,
+    "kill-switch": cmd_kill,
+}
 SYNC = {"gen-secret": cmd_gen_secret, "keystore": cmd_keystore, "check-config": cmd_check_config}
 
 

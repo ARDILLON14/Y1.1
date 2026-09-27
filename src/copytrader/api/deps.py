@@ -9,7 +9,8 @@ from copytrader.api.server import ApiContext
 
 
 def ctx(request: Request) -> ApiContext:
-    return request.app.state.ctx  # type: ignore[no-any-return]
+    context: ApiContext = request.app.state.ctx
+    return context
 
 
 def client_ip(request: Request) -> str:

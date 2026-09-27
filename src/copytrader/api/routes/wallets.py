@@ -26,8 +26,13 @@ async def _after_change(request: Request) -> None:
 
 
 @router.get("/wallets")
-async def list_wallets(request: Request, status: str | None = None, list_type: str | None = None,
-                       selected: bool | None = None, _: Session = Depends(session)) -> list[dict[str, Any]]:
+async def list_wallets(
+    request: Request,
+    status: str | None = None,
+    list_type: str | None = None,
+    selected: bool | None = None,
+    _: Session = Depends(session),
+) -> list[dict[str, Any]]:
     c = ctx(request).container
     async with c.db.session() as s:
         wallets = await WalletRepo(s).list()
@@ -54,11 +59,16 @@ class WalletBody(BaseModel):
 @router.post("/wallets")
 async def add_wallet(body: WalletBody, request: Request, sess: Session = Depends(write_session)) -> dict[str, Any]:
     c = ctx(request).container
-    created = await c.collector.add_wallet(body.address, label=body.label, notes=body.notes,
-                                           list_type=parse_list_type(body.list_type) if body.list_type else None)
+    created = await c.collector.add_wallet(
+        body.address,
+        label=body.label,
+        notes=body.notes,
+        list_type=parse_list_type(body.list_type) if body.list_type else None,
+    )
     async with c.db.session() as s:
-        await AuditRepo(s).add(sess.username, "wallet_add", body.address, {"list_type": body.list_type},
-                               client_ip(request))
+        await AuditRepo(s).add(
+            sess.username, "wallet_add", body.address, {"list_type": body.list_type}, client_ip(request)
+        )
     await _after_change(request)
     return {"created": created}
 
@@ -72,9 +82,13 @@ async def import_wallets(body: ImportBody, request: Request, sess: Session = Dep
     c = ctx(request).container
     report = await c.collector.import_csv(body.csv)
     async with c.db.session() as s:
-        await AuditRepo(s).add(sess.username, "wallet_import", None,
-                               {"added": len(report.added), "updated": len(report.updated),
-                                "errors": len(report.errors)}, client_ip(request))
+        await AuditRepo(s).add(
+            sess.username,
+            "wallet_import",
+            None,
+            {"added": len(report.added), "updated": len(report.updated), "errors": len(report.errors)},
+            client_ip(request),
+        )
     await _after_change(request)
     return report.__dict__
 
@@ -97,16 +111,31 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
         positions = await PositionRepo(s).list(limit=50)
     return {
         "wallet": ser.wallet(w, m_all),
-        "metrics": {"all": m_all.data if m_all else None, "recent": m_recent.data if m_recent else None,
-                    "decayed": m_decayed.data if m_decayed else None},
+        "metrics": {
+            "all": m_all.data if m_all else None,
+            "recent": m_recent.data if m_recent else None,
+            "decayed": m_decayed.data if m_decayed else None,
+        },
         "flags": [ser.flag(f) for f in flags],
         "score": ser.score(scores[0]) if scores else None,
-        "score_history": [{"ts": ser.iso(sc.computed_at), "score": sc.score, "status": sc.status}
-                          for sc in reversed(scores)],
-        "transactions": [{"signature": t.signature, "block_time": ser.iso(t.block_time), "side": t.side,
-                          "token_mint": t.token_mint, "token_amount": t.token_amount, "price_usd": t.price_usd,
-                          "value_usd": t.value_usd, "dex": t.dex, "source": t.source,
-                          "detection_latency_ms": t.detection_latency_ms} for t in txs],
+        "score_history": [
+            {"ts": ser.iso(sc.computed_at), "score": sc.score, "status": sc.status} for sc in reversed(scores)
+        ],
+        "transactions": [
+            {
+                "signature": t.signature,
+                "block_time": ser.iso(t.block_time),
+                "side": t.side,
+                "token_mint": t.token_mint,
+                "token_amount": t.token_amount,
+                "price_usd": t.price_usd,
+                "value_usd": t.value_usd,
+                "dex": t.dex,
+                "source": t.source,
+                "detection_latency_ms": t.detection_latency_ms,
+            }
+            for t in txs
+        ],
         "n_transactions": n_tx,
         "positions": [ser.position(p) for p in positions if p.source_wallet_id == w.id],
     }
@@ -120,8 +149,9 @@ class WalletPatch(BaseModel):
 
 
 @router.patch("/wallets/{address}")
-async def patch_wallet(address: str, body: WalletPatch, request: Request,
-                       sess: Session = Depends(write_session)) -> dict[str, Any]:
+async def patch_wallet(
+    address: str, body: WalletPatch, request: Request, sess: Session = Depends(write_session)
+) -> dict[str, Any]:
     c = ctx(request).container
     changes = body.model_dump(exclude_unset=True)
     async with c.db.session() as s:
@@ -161,16 +191,17 @@ async def selection(request: Request, _: Session = Depends(session)) -> dict[str
         snap = await AnalyticsRepo(s).latest_selection()
         wallets = await WalletRepo(s).list()
     return {
-        "top_n": c.cfg.selection.top_n, "min_score": c.cfg.selection.min_score,
+        "top_n": c.cfg.selection.top_n,
+        "min_score": c.cfg.selection.min_score,
         "computed_at": ser.iso(snap.computed_at) if snap else None,
-        "selected": [ser.wallet(w) for w in sorted((w for w in wallets if w.selected),
-                                                   key=lambda w: w.rank or 999)],
+        "selected": [ser.wallet(w) for w in sorted((w for w in wallets if w.selected), key=lambda w: w.rank or 999)],
     }
 
 
 @router.get("/tokens/{mint}")
-async def token_info(mint: str, request: Request, refresh: bool = Query(False),
-                     _: Session = Depends(session)) -> dict[str, Any]:
+async def token_info(
+    mint: str, request: Request, refresh: bool = Query(False), _: Session = Depends(session)
+) -> dict[str, Any]:
     c = ctx(request).container
     info = await c.tokens.get(mint, max_age_seconds=0 if refresh else None)
     data = asdict(info)

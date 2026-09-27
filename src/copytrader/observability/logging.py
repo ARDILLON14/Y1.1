@@ -17,7 +17,8 @@ from copytrader.security.redaction import REDACTOR
 
 
 def _redact_processor(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
-    return REDACTOR.data(event_dict)  # type: ignore[no-any-return]
+    redacted: dict[str, Any] = REDACTOR.data(event_dict)
+    return redacted
 
 
 def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
@@ -32,9 +33,7 @@ def configure_logging(level: str = "INFO", json_logs: bool = True) -> None:
         _redact_processor,
     ]
     renderer: Any = (
-        structlog.processors.JSONRenderer()
-        if json_logs
-        else structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
+        structlog.processors.JSONRenderer() if json_logs else structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
     )
     structlog.configure(
         processors=[*shared, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],

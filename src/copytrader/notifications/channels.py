@@ -10,6 +10,7 @@ Guarantees:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import time
 from collections.abc import Callable
@@ -55,8 +56,10 @@ class TelegramChannel:
     async def send(self, n: Notification) -> None:
         text = f"<b>{html.escape(n.title)}</b>\n\n{html.escape(n.body)}"[: self.MAX]
         await self.bucket.acquire()
-        resp = await self._client.post(self._url, json={"chat_id": self._chat, "text": text, "parse_mode": "HTML",
-                                                        "disable_web_page_preview": True})
+        resp = await self._client.post(
+            self._url,
+            json={"chat_id": self._chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+        )
         if resp.status_code == 429:
             retry = float((resp.json().get("parameters") or {}).get("retry_after", 5))
             self.bucket.penalize(retry)
@@ -131,10 +134,8 @@ class NotificationService:
     async def stop(self, flush_timeout: float = 5.0) -> None:
         if self._task is None:
             return
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._queue.join(), timeout=flush_timeout)
-        except TimeoutError:
-            pass
         self._task.cancel()
         await asyncio.gather(self._task, return_exceptions=True)
         self._task = None
@@ -151,8 +152,12 @@ class NotificationService:
                             break
                         except Exception as exc:
                             metrics.NOTIFICATIONS.labels(channel=ch.name, outcome="error").inc()
-                            log.warning("notification_failed", channel=ch.name, attempt=attempt + 1,
-                                        error=REDACTOR.text(str(exc)))
-                            await asyncio.sleep(2 ** attempt)
+                            log.warning(
+                                "notification_failed",
+                                channel=ch.name,
+                                attempt=attempt + 1,
+                                error=REDACTOR.text(str(exc)),
+                            )
+                            await asyncio.sleep(2**attempt)
             finally:
                 self._queue.task_done()

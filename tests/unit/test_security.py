@@ -63,8 +63,7 @@ def test_keystore_wrong_passphrase(tmp_path):
 
 def test_keystore_rejects_open_permissions(tmp_path):
     path = tmp_path / "ks.json"
-    write_keystore(path, create_keystore_from_keypair_bytes(bytes(Keypair()), "correct horse battery",
-                                                            scrypt_n=FAST_N))
+    write_keystore(path, create_keystore_from_keypair_bytes(bytes(Keypair()), "correct horse battery", scrypt_n=FAST_N))
     os.chmod(path, 0o644)
     with pytest.raises(SecurityError):
         read_keystore(path)
@@ -127,36 +126,58 @@ def test_hmac_key_rotation_accepts_previous_key():
 def _ata(owner: Pubkey, mint: str) -> Pubkey:
     return Pubkey.find_program_address(
         [bytes(owner), bytes(Pubkey.from_string(TOKEN_PROGRAM)), bytes(Pubkey.from_string(mint))],
-        Pubkey.from_string(ATA_PROGRAM))[0]
+        Pubkey.from_string(ATA_PROGRAM),
+    )[0]
 
 
 def _cu_limit(units: int) -> Instruction:
-    return Instruction(Pubkey.from_string("ComputeBudget111111111111111111111111111111"),
-                       b"\x02" + struct.pack("<I", units), [])
+    return Instruction(
+        Pubkey.from_string("ComputeBudget111111111111111111111111111111"), b"\x02" + struct.pack("<I", units), []
+    )
 
 
 def _cu_price(micro: int) -> Instruction:
-    return Instruction(Pubkey.from_string("ComputeBudget111111111111111111111111111111"),
-                       b"\x03" + struct.pack("<Q", micro), [])
+    return Instruction(
+        Pubkey.from_string("ComputeBudget111111111111111111111111111111"), b"\x03" + struct.pack("<Q", micro), []
+    )
 
 
-def _jup_swap_tx(kp: Keypair, *, wrap: int, extra: list[Instruction] | None = None, payer: Keypair | None = None,
-                 cu_price: int = 100_000) -> bytes:
+def _jup_swap_tx(
+    kp: Keypair,
+    *,
+    wrap: int,
+    extra: list[Instruction] | None = None,
+    payer: Keypair | None = None,
+    cu_price: int = 100_000,
+) -> bytes:
     owner = kp.pubkey()
     wsol = _ata(owner, WSOL_MINT)
     token = Pubkey.from_string(TOKEN_PROGRAM)
     ixs = [
         _cu_limit(200_000),
         _cu_price(cu_price),
-        Instruction(Pubkey.from_string(ATA_PROGRAM), b"\x01", [
-            AccountMeta(owner, True, True), AccountMeta(wsol, False, True), AccountMeta(owner, False, False),
-            AccountMeta(Pubkey.from_string(WSOL_MINT), False, False)]),
+        Instruction(
+            Pubkey.from_string(ATA_PROGRAM),
+            b"\x01",
+            [
+                AccountMeta(owner, True, True),
+                AccountMeta(wsol, False, True),
+                AccountMeta(owner, False, False),
+                AccountMeta(Pubkey.from_string(WSOL_MINT), False, False),
+            ],
+        ),
         transfer(TransferParams(from_pubkey=owner, to_pubkey=wsol, lamports=wrap)),
         Instruction(token, bytes([17]), [AccountMeta(wsol, False, True)]),
-        Instruction(Pubkey.from_string(JUPITER_V6_PROGRAM), b"\xe5\x17\xcb\x97" + b"\x00" * 20,
-                    [AccountMeta(owner, True, False), AccountMeta(wsol, False, True)]),
-        Instruction(token, bytes([9]), [AccountMeta(wsol, False, True), AccountMeta(owner, False, True),
-                                        AccountMeta(owner, True, False)]),
+        Instruction(
+            Pubkey.from_string(JUPITER_V6_PROGRAM),
+            b"\xe5\x17\xcb\x97" + b"\x00" * 20,
+            [AccountMeta(owner, True, False), AccountMeta(wsol, False, True)],
+        ),
+        Instruction(
+            token,
+            bytes([9]),
+            [AccountMeta(wsol, False, True), AccountMeta(owner, False, True), AccountMeta(owner, True, False)],
+        ),
         *(extra or []),
     ]
     fee_payer = (payer or kp).pubkey()
@@ -167,8 +188,14 @@ def _jup_swap_tx(kp: Keypair, *, wrap: int, extra: list[Instruction] | None = No
 
 
 def _intent(amount=1_000_000_000, notional=50.0, cid="o1"):
-    return SignIntent(client_order_id=cid, purpose="entry", input_mint=WSOL_MINT, output_mint="X" * 32,
-                      amount_in_raw=amount, notional_usd=notional)
+    return SignIntent(
+        client_order_id=cid,
+        purpose="entry",
+        input_mint=WSOL_MINT,
+        output_mint="X" * 32,
+        amount_in_raw=amount,
+        notional_usd=notional,
+    )
 
 
 def test_policy_allows_standard_jupiter_swap():
@@ -190,9 +217,15 @@ def test_policy_rejects_drain_via_system_transfer():
 def test_policy_rejects_top_level_token_transfer_and_unknown_program():
     kp = Keypair()
     owner = kp.pubkey()
-    evil_token_transfer = Instruction(Pubkey.from_string(TOKEN_PROGRAM), bytes([3]) + struct.pack("<Q", 10), [
-        AccountMeta(Pubkey.new_unique(), False, True), AccountMeta(Pubkey.new_unique(), False, True),
-        AccountMeta(owner, True, False)])
+    evil_token_transfer = Instruction(
+        Pubkey.from_string(TOKEN_PROGRAM),
+        bytes([3]) + struct.pack("<Q", 10),
+        [
+            AccountMeta(Pubkey.new_unique(), False, True),
+            AccountMeta(Pubkey.new_unique(), False, True),
+            AccountMeta(owner, True, False),
+        ],
+    )
     unknown = Instruction(Pubkey.new_unique(), b"\x00", [AccountMeta(owner, True, True)])
     tx = VersionedTransaction.from_bytes(_jup_swap_tx(kp, wrap=1, extra=[evil_token_transfer, unknown]))
     violations = SignerPolicy(owner=str(owner)).inspect(tx, _intent())
@@ -213,8 +246,11 @@ def test_policy_rejects_foreign_fee_payer_and_overwrap():
 def test_policy_priority_fee_cap_and_tip():
     kp = Keypair()
     limits = SignerLimits(max_priority_fee_lamports=10_000, max_tip_lamports=1000)
-    tip = transfer(TransferParams(from_pubkey=kp.pubkey(),
-                                  to_pubkey=Pubkey.from_string(sorted(JITO_TIP_ACCOUNTS)[0]), lamports=5000))
+    tip = transfer(
+        TransferParams(
+            from_pubkey=kp.pubkey(), to_pubkey=Pubkey.from_string(sorted(JITO_TIP_ACCOUNTS)[0]), lamports=5000
+        )
+    )
     tx = VersionedTransaction.from_bytes(_jup_swap_tx(kp, wrap=1, extra=[tip], cu_price=10_000_000))
     violations = SignerPolicy(owner=str(kp.pubkey()), limits=limits).inspect(tx, _intent())
     assert any("priority fee" in v for v in violations)
@@ -223,8 +259,12 @@ def test_policy_priority_fee_cap_and_tip():
 
 def test_policy_notional_caps_and_rate_limit(tmp_path):
     kp = Keypair()
-    limits = SignerLimits(max_notional_usd_per_tx=100, max_notional_usd_per_day=150, max_tx_per_minute=10,
-                          state_file=str(tmp_path / "state.json"))
+    limits = SignerLimits(
+        max_notional_usd_per_tx=100,
+        max_notional_usd_per_day=150,
+        max_tx_per_minute=10,
+        state_file=str(tmp_path / "state.json"),
+    )
     policy = SignerPolicy(owner=str(kp.pubkey()), limits=limits)
     tx = VersionedTransaction.from_bytes(_jup_swap_tx(kp, wrap=1))
     with pytest.raises(SignerPolicyViolation, match="per-transaction"):

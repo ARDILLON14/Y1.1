@@ -16,8 +16,9 @@ EXTREME_REGIMES = frozenset({"extreme_up", "extreme_down"})
 
 
 class RegimeClassifier:
-    def __init__(self, series: Sequence[tuple[datetime, float]], *, trend_threshold_pct: float,
-                 extreme_threshold_pct: float) -> None:
+    def __init__(
+        self, series: Sequence[tuple[datetime, float]], *, trend_threshold_pct: float, extreme_threshold_pct: float
+    ) -> None:
         pairs = sorted(series)
         self._times = [t for t, _ in pairs]
         self._prices = [p for _, p in pairs]

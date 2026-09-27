@@ -28,8 +28,7 @@ def _canonical(method: str, path: str, ts: str, nonce: str, body: bytes) -> byte
     return "\n".join([method.upper(), path, ts, nonce, hashlib.sha256(body).hexdigest()]).encode()
 
 
-def sign_request(key: bytes, method: str, path: str, body: bytes,
-                 now: float | None = None) -> dict[str, str]:
+def sign_request(key: bytes, method: str, path: str, body: bytes, now: float | None = None) -> dict[str, str]:
     ts = str(int(now if now is not None else time.time()))
     nonce = secrets.token_hex(16)
     sig = hmac.new(key, _canonical(method, path, ts, nonce, body), hashlib.sha256).hexdigest()
@@ -65,8 +64,7 @@ class HmacVerifier:
         if len(nonce) < 16 or len(nonce) > 128:
             raise AuthError("bad nonce")
         message = _canonical(method, path, ts, nonce, body)
-        if not any(hmac.compare_digest(hmac.new(k, message, hashlib.sha256).hexdigest(), sig)
-                   for k in self.keys):
+        if not any(hmac.compare_digest(hmac.new(k, message, hashlib.sha256).hexdigest(), sig) for k in self.keys):
             raise AuthError("bad signature")
         self._purge(now)
         if nonce in self._nonces:

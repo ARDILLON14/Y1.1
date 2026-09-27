@@ -61,8 +61,17 @@ async def test_buy_is_copied_in_paper_and_mirror_sell_closes(container):
     sig = sigs[0]
     assert sig.status == SignalStatus.EXECUTED.value, sig.decision
     names = [chk["name"] for chk in sig.decision["checks"]]
-    for expected in ("wallet_eligible", "min_score", "signal_age", "liquidity", "token_risk", "slippage",
-                     "total_exposure", "signal_ttl", "execution"):
+    for expected in (
+        "wallet_eligible",
+        "min_score",
+        "signal_age",
+        "liquidity",
+        "token_risk",
+        "slippage",
+        "total_exposure",
+        "signal_ttl",
+        "execution",
+    ):
         assert expected in names
     positions = await _positions(c)
     assert len(positions) == 1 and positions[0].status == PositionStatus.OPEN.value
@@ -145,7 +154,7 @@ async def test_stop_loss_closes_position(container):
         return p * 0.5 if (m == mint and p) else p
 
     market.token_price = crashed  # type: ignore[method-assign]
-    c.tokens._price_cache.clear()  # noqa: SLF001
+    c.tokens._price_cache.clear()
     await c.positions.check_once()
     pos = (await _positions(c))[0]
     assert pos.status == PositionStatus.CLOSED.value

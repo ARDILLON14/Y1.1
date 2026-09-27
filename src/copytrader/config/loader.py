@@ -43,7 +43,7 @@ def env_overrides(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     for key, raw in environ.items():
         if not key.startswith(ENV_PREFIX):
             continue
-        path = [p.lower() for p in key[len(ENV_PREFIX):].split("__") if p]
+        path = [p.lower() for p in key[len(ENV_PREFIX) :].split("__") if p]
         if not path:
             continue
         try:
@@ -70,8 +70,7 @@ def read_yaml(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def load_base_config_dict(path: str | Path | None = None,
-                          environ: Mapping[str, str] | None = None) -> dict[str, Any]:
+def load_base_config_dict(path: str | Path | None = None, environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     environ = os.environ if environ is None else environ
     cfg_path = path or environ.get("COPYTRADER_CONFIG", DEFAULT_CONFIG_PATH)
     return deep_merge(read_yaml(cfg_path), env_overrides(environ))

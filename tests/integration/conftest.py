@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import shutil
 from collections.abc import AsyncIterator
-from pathlib import Path
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,16 +20,21 @@ from copytrader.db.repositories import DbConfigStore
 
 BASE_TEST_CONFIG: dict[str, Any] = {
     "app": {"operating_level": 3, "environment": "test"},
-    "providers": {"mode": "simulated",
-                  "simulated": {"seed": 11, "n_wallets": 17, "n_tokens": 50, "history_days": 45,
-                                "realtime_trades_per_minute": 0},
-                  "token_categories_file": None},
+    "providers": {
+        "mode": "simulated",
+        "simulated": {"seed": 11, "n_wallets": 17, "n_tokens": 50, "history_days": 45, "realtime_trades_per_minute": 0},
+        "token_categories_file": None,
+    },
     "analysis": {"history_days": 45, "recompute_interval_seconds": 3600},
     "paper": {"simulated_latency_ms": 0},
     "observability": {"metrics_enabled": False, "json_logs": False},
     "api": {"enabled": False},
-    "risk": {"min_liquidity_usd": 30000, "min_token_age_minutes": 60, "max_token_risk_score": 60,
-             "reentry_cooldown_minutes": 0},
+    "risk": {
+        "min_liquidity_usd": 30000,
+        "min_token_age_minutes": 60,
+        "max_token_risk_score": 60,
+        "reentry_cooldown_minutes": 0,
+    },
     "latency": {"max_quote_age_seconds": 30},
 }
 
@@ -98,17 +103,33 @@ def good_token(c: Container) -> str:
         liq = market.liquidity(mint, now) or 0
         price = market.token_price(mint, now) or 0
         mcap = price * tok.supply
-        if (liq >= cfg.min_liquidity_usd * 2 and cfg.min_market_cap_usd <= mcap <= cfg.max_market_cap_usd
-                and (now - tok.created_at).total_seconds() > 7200 and tok.rug_at is None
-                and tok.risk_score < 30 and not tok.mint_authority and not tok.freeze_authority
-                and not tok.dangerous):
+        if (
+            liq >= cfg.min_liquidity_usd * 2
+            and cfg.min_market_cap_usd <= mcap <= cfg.max_market_cap_usd
+            and (now - tok.created_at).total_seconds() > 7200
+            and tok.rug_at is None
+            and tok.risk_score < 30
+            and not tok.mint_authority
+            and not tok.freeze_authority
+            and not tok.dangerous
+        ):
             return mint
     raise AssertionError("no suitable token in the simulated market")
 
 
-def live_swap(c: Container, wallet: str, mint: str, side: Side, usd: float, *, qty: float | None = None,
-              before: float | None = None, after: float | None = None, sig: str | None = None,
-              age_seconds: float = 1.0) -> SwapEvent:
+def live_swap(
+    c: Container,
+    wallet: str,
+    mint: str,
+    side: Side,
+    usd: float,
+    *,
+    qty: float | None = None,
+    before: float | None = None,
+    after: float | None = None,
+    sig: str | None = None,
+    age_seconds: float = 1.0,
+) -> SwapEvent:
     from datetime import timedelta
 
     market = c.providers.simulated_market
@@ -116,10 +137,24 @@ def live_swap(c: Container, wallet: str, mint: str, side: Side, usd: float, *, q
     price = market.token_price(mint, now)
     qty = qty if qty is not None else usd / price
     sol = market.sol_price(now)
-    ev = SwapEvent(wallet=wallet, signature=sig or f"test-{side.value}-{mint[:6]}-{now.timestamp()}", slot=1,
-                   block_time=now - timedelta(seconds=age_seconds), token_mint=mint, side=side, token_amount=qty,
-                   token_decimals=6, quote_mint="So11111111111111111111111111111111111111112",
-                   quote_amount=usd / sol, price_quote=(usd / sol) / qty, price_usd=usd / qty, value_usd=usd,
-                   sol_price_usd=sol, token_balance_before=before, token_balance_after=after,
-                   source=TxSource.STREAM, detected_at=now)
+    ev = SwapEvent(
+        wallet=wallet,
+        signature=sig or f"test-{side.value}-{mint[:6]}-{now.timestamp()}",
+        slot=1,
+        block_time=now - timedelta(seconds=age_seconds),
+        token_mint=mint,
+        side=side,
+        token_amount=qty,
+        token_decimals=6,
+        quote_mint="So11111111111111111111111111111111111111112",
+        quote_amount=usd / sol,
+        price_quote=(usd / sol) / qty,
+        price_usd=usd / qty,
+        value_usd=usd,
+        sol_price_usd=sol,
+        token_balance_before=before,
+        token_balance_after=after,
+        source=TxSource.STREAM,
+        detected_at=now,
+    )
     return replace(ev)

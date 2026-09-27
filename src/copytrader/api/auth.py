@@ -47,8 +47,14 @@ class SessionStore:
 
     def create(self, username: str, ip: str | None) -> Session:
         now = time.time()
-        sess = Session(id=secrets.token_urlsafe(32), username=username, csrf=secrets.token_urlsafe(24),
-                       created=now, expires=now + self.ttl, ip=ip)
+        sess = Session(
+            id=secrets.token_urlsafe(32),
+            username=username,
+            csrf=secrets.token_urlsafe(24),
+            created=now,
+            expires=now + self.ttl,
+            ip=ip,
+        )
         self._sessions[sess.id] = sess
         self._gc(now)
         return sess

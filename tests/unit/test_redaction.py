@@ -27,8 +27,7 @@ def test_signatures_are_not_redacted():
 
 def test_sensitive_keys_in_structures():
     r = Redactor()
-    data = {"password": "x" * 10, "token_mint": "abc", "nested": {"api_key": "zzz", "ok": 1},
-            "raw": list(range(64))}
+    data = {"password": "x" * 10, "token_mint": "abc", "nested": {"api_key": "zzz", "ok": 1}, "raw": list(range(64))}
     out = r.data(data)
     assert out["password"] == REDACTED
     assert out["token_mint"] == "abc"

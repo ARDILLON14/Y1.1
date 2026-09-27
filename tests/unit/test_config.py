@@ -44,8 +44,16 @@ def test_live_level_requires_signer_and_live_providers():
 
 def test_take_profit_levels_must_increase():
     with pytest.raises(ConfigError):
-        build_config({"exits": {"take_profit_levels": [
-            {"gain_pct": 100, "sell_fraction": 0.5}, {"gain_pct": 50, "sell_fraction": 1}]}})
+        build_config(
+            {
+                "exits": {
+                    "take_profit_levels": [
+                        {"gain_pct": 100, "sell_fraction": 0.5},
+                        {"gain_pct": 50, "sell_fraction": 1},
+                    ]
+                }
+            }
+        )
 
 
 def test_unknown_keys_are_rejected():
@@ -54,10 +62,8 @@ def test_unknown_keys_are_rejected():
 
 
 def test_env_overrides_parse_types():
-    env = {"COPYTRADER__SELECTION__TOP_N": "20", "COPYTRADER__RISK__ALLOW_ADD_TO_POSITION": "true",
-           "OTHER": "x"}
-    assert env_overrides(env) == {"selection": {"top_n": 20},
-                                  "risk": {"allow_add_to_position": True}}
+    env = {"COPYTRADER__SELECTION__TOP_N": "20", "COPYTRADER__RISK__ALLOW_ADD_TO_POSITION": "true", "OTHER": "x"}
+    assert env_overrides(env) == {"selection": {"top_n": 20}, "risk": {"allow_add_to_position": True}}
 
 
 def test_deep_merge_does_not_mutate():

@@ -40,9 +40,13 @@ class ModeStatus:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "ceiling": int(self.ceiling), "level": int(self.level), "level_name": LEVEL_NAMES_ES[int(self.level)],
-            "trade_mode": self.trade_mode.value if self.trade_mode else None, "armed": self.armed,
-            "live_allowed": self.live_allowed, "live_block_reason": self.live_block_reason,
+            "ceiling": int(self.ceiling),
+            "level": int(self.level),
+            "level_name": LEVEL_NAMES_ES[int(self.level)],
+            "trade_mode": self.trade_mode.value if self.trade_mode else None,
+            "armed": self.armed,
+            "live_allowed": self.live_allowed,
+            "live_block_reason": self.live_block_reason,
         }
 
 
@@ -103,13 +107,21 @@ class ModeController:
         return TradeMode.LIVE if self.live_allowed else TradeMode.PAPER
 
     def status(self) -> ModeStatus:
-        return ModeStatus(ceiling=self.ceiling, level=self.level, trade_mode=self.trade_mode, armed=self._armed,
-                          live_allowed=self.live_allowed, live_block_reason=self.live_block_reason())
+        return ModeStatus(
+            ceiling=self.ceiling,
+            level=self.level,
+            trade_mode=self.trade_mode,
+            armed=self._armed,
+            live_allowed=self.live_allowed,
+            live_block_reason=self.live_block_reason(),
+        )
 
     async def set_level(self, level: OperatingLevel, *, actor: str, ip: str | None = None) -> ModeStatus:
         if level > self.ceiling:
-            raise ConfigError(f"el nivel {int(level)} supera el máximo configurado ({int(self.ceiling)}); "
-                              "súbelo en config/settings.yaml (app.operating_level) y reinicia")
+            raise ConfigError(
+                f"el nivel {int(level)} supera el máximo configurado ({int(self.ceiling)}); "
+                "súbelo en config/settings.yaml (app.operating_level) y reinicia"
+            )
         old = self.level
         self._runtime_level = level
         if not level.is_live:
@@ -117,10 +129,13 @@ class ModeController:
         async with self.db.session() as s:
             await SystemStateRepo(s).set(STATE_KEY, {"level": int(level)})
             await AuditRepo(s).add(actor, "set_level", str(int(level)), {"old": int(old)}, ip)
-        self.bus.publish(SystemMessage(
-            title="Nivel operativo cambiado",
-            body=f"{int(old)} → {int(level)} ({LEVEL_NAMES_ES[int(level)]}) por {actor}",
-            severity=Severity.WARNING if level.is_live else Severity.INFO))
+        self.bus.publish(
+            SystemMessage(
+                title="Nivel operativo cambiado",
+                body=f"{int(old)} → {int(level)} ({LEVEL_NAMES_ES[int(level)]}) por {actor}",
+                severity=Severity.WARNING if level.is_live else Severity.INFO,
+            )
+        )
         return self.status()
 
     async def arm(self, *, actor: str, ip: str | None = None) -> ModeStatus:
@@ -132,9 +147,13 @@ class ModeController:
         self._armed = True
         async with self.db.session() as s:
             await AuditRepo(s).add(actor, "arm_live", None, {"level": int(self.level)}, ip)
-        self.bus.publish(SystemMessage(title="⚠️ Trading REAL armado",
-                                       body=f"Nivel {int(self.level)} armado por {actor}",
-                                       severity=Severity.CRITICAL))
+        self.bus.publish(
+            SystemMessage(
+                title="⚠️ Trading REAL armado",
+                body=f"Nivel {int(self.level)} armado por {actor}",
+                severity=Severity.CRITICAL,
+            )
+        )
         return self.status()
 
     async def disarm(self, *, actor: str, reason: str = "manual", ip: str | None = None) -> ModeStatus:
@@ -143,6 +162,7 @@ class ModeController:
         if was:
             async with self.db.session() as s:
                 await AuditRepo(s).add(actor, "disarm_live", None, {"reason": reason}, ip)
-            self.bus.publish(SystemMessage(title="Trading real desarmado", body=f"{actor}: {reason}",
-                                           severity=Severity.WARNING))
+            self.bus.publish(
+                SystemMessage(title="Trading real desarmado", body=f"{actor}: {reason}", severity=Severity.WARNING)
+            )
         return self.status()

@@ -45,8 +45,9 @@ def evaluate_exit(pos: PositionView, price: float, now: datetime, cfg: ExitsSect
         return None
     change = price / pos.entry_price_usd - 1
     if change <= -cfg.emergency_stop_loss_pct / 100:
-        return ExitDecision(1.0, "emergency_stop",
-                            f"Stop de emergencia: {change * 100:.1f}% ≤ -{cfg.emergency_stop_loss_pct:.0f}%")
+        return ExitDecision(
+            1.0, "emergency_stop", f"Stop de emergencia: {change * 100:.1f}% ≤ -{cfg.emergency_stop_loss_pct:.0f}%"
+        )
     if pos.exit_mode is ExitMode.MIRROR:
         return None
 
@@ -59,16 +60,21 @@ def evaluate_exit(pos: PositionView, price: float, now: datetime, cfg: ExitsSect
         if peak_gain >= cfg.trailing_activation_pct / 100:
             drop = 1 - price / peak
             if drop >= cfg.trailing_stop_pct / 100:
-                return ExitDecision(1.0, "trailing_stop",
-                                    f"Trailing stop: -{drop * 100:.1f}% desde máximo (+{peak_gain * 100:.0f}%)")
+                return ExitDecision(
+                    1.0, "trailing_stop", f"Trailing stop: -{drop * 100:.1f}% desde máximo (+{peak_gain * 100:.0f}%)"
+                )
 
     for idx, level in enumerate(cfg.take_profit_levels):
         if idx in pos.tp_levels_hit:
             continue
         if change >= level.gain_pct / 100:
-            return ExitDecision(level.sell_fraction, f"take_profit_{idx + 1}",
-                                f"Take profit {idx + 1}: +{change * 100:.1f}% ≥ +{level.gain_pct:.0f}% "
-                                f"(vende {level.sell_fraction * 100:.0f}%)", tp_level=idx)
+            return ExitDecision(
+                level.sell_fraction,
+                f"take_profit_{idx + 1}",
+                f"Take profit {idx + 1}: +{change * 100:.1f}% ≥ +{level.gain_pct:.0f}% "
+                f"(vende {level.sell_fraction * 100:.0f}%)",
+                tp_level=idx,
+            )
         break  # levels are ordered: do not skip ahead
 
     if cfg.max_hold_minutes is not None:

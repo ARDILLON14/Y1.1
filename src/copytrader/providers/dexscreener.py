@@ -30,7 +30,7 @@ class DexScreenerClient:
         out: dict[str, MarketData] = {}
         unique = list(dict.fromkeys(mints))
         for i in range(0, len(unique), self.BATCH):
-            chunk = unique[i:i + self.BATCH]
+            chunk = unique[i : i + self.BATCH]
             data = await self.http.get_json(f"{self.base_url}/tokens/v1/{self.chain}/{','.join(chunk)}")
             pairs = data if isinstance(data, list) else (data or {}).get("pairs") or []
             out.update(aggregate_pairs(pairs, set(chunk)))
@@ -60,8 +60,7 @@ def aggregate_pairs(pairs: list[dict[str, Any]], mints: set[str]) -> dict[str, M
     result: dict[str, MarketData] = {}
     for mint, pair in best.items():
         base = pair.get("baseToken") or {}
-        changes = {k: v for k, v in ((k, _f(v)) for k, v in (pair.get("priceChange") or {}).items())
-                   if v is not None}
+        changes = {k: v for k, v in ((k, _f(v)) for k, v in (pair.get("priceChange") or {}).items()) if v is not None}
         created_ms = oldest.get(mint)
         result[mint] = MarketData(
             mint=mint,

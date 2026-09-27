@@ -54,8 +54,7 @@ class KeystoreFile:
     data: dict[str, Any]
 
 
-def encrypt_secret(secret: bytes, public_key: str, passphrase: str,
-                   scrypt_n: int = DEFAULT_SCRYPT_N) -> dict[str, Any]:
+def encrypt_secret(secret: bytes, public_key: str, passphrase: str, scrypt_n: int = DEFAULT_SCRYPT_N) -> dict[str, Any]:
     if len(passphrase) < MIN_PASSPHRASE_LEN:
         raise SecurityError(f"passphrase must be at least {MIN_PASSPHRASE_LEN} characters")
     salt = secrets.token_bytes(16)
@@ -79,8 +78,7 @@ def decrypt_secret(data: dict[str, Any], passphrase: str) -> bytes:
     params = data["kdf_params"]
     key = _derive(passphrase, _b64d(params["salt"]), int(params["n"]), int(params["r"]), int(params["p"]))
     try:
-        return AESGCM(key).decrypt(_b64d(data["nonce"]), _b64d(data["ciphertext"]),
-                                   str(data["public_key"]).encode())
+        return AESGCM(key).decrypt(_b64d(data["nonce"]), _b64d(data["ciphertext"]), str(data["public_key"]).encode())
     except InvalidTag as exc:
         raise SecurityError("wrong passphrase or corrupted keystore") from exc
 
@@ -110,8 +108,9 @@ def read_keystore(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def create_keystore_from_keypair_bytes(keypair_bytes: bytes, passphrase: str,
-                                       scrypt_n: int = DEFAULT_SCRYPT_N) -> dict[str, Any]:
+def create_keystore_from_keypair_bytes(
+    keypair_bytes: bytes, passphrase: str, scrypt_n: int = DEFAULT_SCRYPT_N
+) -> dict[str, Any]:
     """Build a keystore from a 64-byte Solana keypair (secret || public)."""
     from solders.keypair import Keypair
 

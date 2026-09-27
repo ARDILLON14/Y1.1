@@ -80,8 +80,16 @@ class ExitHandler(Protocol):
 
 
 class SignalEngine:
-    def __init__(self, *, db: Database, clock: Clock, config: Callable[[], AppConfig], bus: EventBus,
-                 mode: ModeController, chain: str = "solana") -> None:
+    def __init__(
+        self,
+        *,
+        db: Database,
+        clock: Clock,
+        config: Callable[[], AppConfig],
+        bus: EventBus,
+        mode: ModeController,
+        chain: str = "solana",
+    ) -> None:
         self.db = db
         self.clock = clock
         self._config = config
@@ -102,9 +110,15 @@ class SignalEngine:
             rows = await WalletRepo(s).list()
         self._wallets = {
             w.address: WalletInfo(
-                id=w.id, address=w.address, label=w.label, list_type=ListType(w.list_type),
-                status=WalletStatus(w.status), score=w.score, selected=w.selected,
-                exit_mode_override=ExitMode(w.exit_mode_override) if w.exit_mode_override else None)
+                id=w.id,
+                address=w.address,
+                label=w.label,
+                list_type=ListType(w.list_type),
+                status=WalletStatus(w.status),
+                score=w.score,
+                selected=w.selected,
+                exit_mode_override=ExitMode(w.exit_mode_override) if w.exit_mode_override else None,
+            )
             for w in rows
         }
 
@@ -144,8 +158,11 @@ class SignalEngine:
         if info.list_type is ListType.BLACKLIST:
             return SignalAction.IGNORE, "Wallet en blacklist"
         if info.list_type is ListType.WATCHLIST:
-            return ((SignalAction.ALERT, "Wallet en watchlist") if cfg.selection.alert_on_watchlist
-                    else (SignalAction.IGNORE, "Watchlist sin alertas"))
+            return (
+                (SignalAction.ALERT, "Wallet en watchlist")
+                if cfg.selection.alert_on_watchlist
+                else (SignalAction.IGNORE, "Watchlist sin alertas")
+            )
         copyable = info.selected and info.status is WalletStatus.ACTIVE
         if copyable and swap.side is Side.BUY:
             if level >= OperatingLevel.PAPER:
@@ -167,26 +184,46 @@ class SignalEngine:
             if await TransactionRepo(s).insert_swap(info.id, swap) is None:
                 return  # already processed (duplicate notification / catch-up overlap)
             await WalletRepo(s).touch_activity(info.id, swap.block_time, swap.signature, swap.slot)
-            has_position = bool(swap.side is Side.SELL and
-                                await PositionRepo(s).open_from_wallet_token(info.id, swap.token_mint))
+            has_position = bool(
+                swap.side is Side.SELL and await PositionRepo(s).open_from_wallet_token(info.id, swap.token_mint)
+            )
             action, reason = self.classify(swap, info, has_position)
             signal_id: int | None = None
             if action is not SignalAction.IGNORE:
-                signal_id = await SignalRepo(s).create({
-                    "signal_key": key, "trace_id": trace_id, "wallet_id": info.id,
-                    "source_signature": swap.signature, "token_mint": swap.token_mint, "side": swap.side.value,
-                    "action": action.value, "status": SignalStatus.DETECTED.value,
-                    "source_price_usd": swap.price_usd, "source_value_usd": swap.value_usd,
-                    "source_block_time": swap.block_time, "detected_at": detected_at,
-                    "detection_latency_ms": swap.detection_latency_ms, "wallet_score": info.score,
-                    "operating_level": int(self.mode.level), "reason": reason, "created_at": self.clock.now(),
-                })
+                signal_id = await SignalRepo(s).create(
+                    {
+                        "signal_key": key,
+                        "trace_id": trace_id,
+                        "wallet_id": info.id,
+                        "source_signature": swap.signature,
+                        "token_mint": swap.token_mint,
+                        "side": swap.side.value,
+                        "action": action.value,
+                        "status": SignalStatus.DETECTED.value,
+                        "source_price_usd": swap.price_usd,
+                        "source_value_usd": swap.value_usd,
+                        "source_block_time": swap.block_time,
+                        "detected_at": detected_at,
+                        "detection_latency_ms": swap.detection_latency_ms,
+                        "wallet_score": info.score,
+                        "operating_level": int(self.mode.level),
+                        "reason": reason,
+                        "created_at": self.clock.now(),
+                    }
+                )
         metrics.SIGNALS.labels(action=action.value, status="detected").inc()
         if signal_id is None:
             return
-        log.info("signal_detected", trace_id=trace_id, wallet=swap.wallet, token=swap.token_mint,
-                 side=swap.side.value, action=action.value, value_usd=swap.value_usd,
-                 latency_ms=swap.detection_latency_ms)
+        log.info(
+            "signal_detected",
+            trace_id=trace_id,
+            wallet=swap.wallet,
+            token=swap.token_mint,
+            side=swap.side.value,
+            action=action.value,
+            value_usd=swap.value_usd,
+            latency_ms=swap.detection_latency_ms,
+        )
         await self._enqueue(SignalContext(signal_id, key, trace_id, swap, info, action, detected_at))
 
     async def _enqueue(self, ctx: SignalContext) -> None:
@@ -216,11 +253,20 @@ class SignalEngine:
         elif ctx.action is SignalAction.EXIT and self.exit_handler is not None:
             await self.exit_handler.on_source_sell(ctx)
         elif ctx.action is SignalAction.ALERT:
-            self.bus.publish(SignalAlert(
-                trace_id=ctx.trace_id, wallet=ctx.wallet.address, wallet_label=ctx.wallet.label,
-                wallet_score=ctx.wallet.score, token_mint=ctx.swap.token_mint, token_symbol=None,
-                side=ctx.swap.side.value, price_usd=ctx.swap.price_usd, value_usd=ctx.swap.value_usd,
-                reason=ctx.wallet.list_type.value if ctx.wallet.list_type is not ListType.NONE else "alert"))
+            self.bus.publish(
+                SignalAlert(
+                    trace_id=ctx.trace_id,
+                    wallet=ctx.wallet.address,
+                    wallet_label=ctx.wallet.label,
+                    wallet_score=ctx.wallet.score,
+                    token_mint=ctx.swap.token_mint,
+                    token_symbol=None,
+                    side=ctx.swap.side.value,
+                    price_usd=ctx.swap.price_usd,
+                    value_usd=ctx.swap.value_usd,
+                    reason=ctx.wallet.list_type.value if ctx.wallet.list_type is not ListType.NONE else "alert",
+                )
+            )
             await self._set_status(ctx.signal_id, SignalStatus.ALERTED, None)
         else:
             await self._set_status(ctx.signal_id, SignalStatus.IGNORED, "Sin manejador")
@@ -244,25 +290,39 @@ class SignalEngine:
 
         counts = {"requeued_exits": 0, "expired_entries": 0}
         async with self.db.session() as s:
-            pending = (await s.execute(select(Signal).where(Signal.status == SignalStatus.DETECTED.value))
-                       ).scalars().all()
+            pending = (
+                (await s.execute(select(Signal).where(Signal.status == SignalStatus.DETECTED.value))).scalars().all()
+            )
             requeue: list[SignalContext] = []
             for sig in pending:
                 if sig.action == SignalAction.EXIT.value:
                     wallet = await WalletRepo(s).get(sig.wallet_id)
-                    row = (await s.execute(select(WalletTransaction).where(
-                        WalletTransaction.wallet_id == sig.wallet_id,
-                        WalletTransaction.signature == sig.source_signature,
-                        WalletTransaction.token_mint == sig.token_mint,
-                        WalletTransaction.side == sig.side))).scalar_one_or_none()
+                    row = (
+                        await s.execute(
+                            select(WalletTransaction).where(
+                                WalletTransaction.wallet_id == sig.wallet_id,
+                                WalletTransaction.signature == sig.source_signature,
+                                WalletTransaction.token_mint == sig.token_mint,
+                                WalletTransaction.side == sig.side,
+                            )
+                        )
+                    ).scalar_one_or_none()
                     info = self._wallets.get(wallet.address) if wallet else None
                     if wallet is None or row is None or info is None:
                         sig.status = SignalStatus.FAILED.value
                         sig.reason = "Recuperación: datos de origen no disponibles"
                         continue
-                    requeue.append(SignalContext(sig.id, sig.signal_key, sig.trace_id,
-                                                 row_to_swap(row, wallet.address), info, SignalAction.EXIT,
-                                                 sig.detected_at))
+                    requeue.append(
+                        SignalContext(
+                            sig.id,
+                            sig.signal_key,
+                            sig.trace_id,
+                            row_to_swap(row, wallet.address),
+                            info,
+                            SignalAction.EXIT,
+                            sig.detected_at,
+                        )
+                    )
                 else:
                     sig.status = SignalStatus.EXPIRED.value
                     sig.reason = "Reinicio del sistema: señal caducada sin ejecutar"

@@ -41,8 +41,13 @@ def _wallet(label: str | None, addr: str) -> str:
 
 
 _CHECK_LABELS_SHORT = {
-    "liquidity": "Liquidity", "slippage": "Slippage", "total_exposure": "Exposure", "token_risk": "Token Risk",
-    "price_deviation": "Price deviation", "signal_age": "Delay", "min_score": "Wallet score",
+    "liquidity": "Liquidity",
+    "slippage": "Slippage",
+    "total_exposure": "Exposure",
+    "token_risk": "Token Risk",
+    "price_deviation": "Price deviation",
+    "signal_age": "Delay",
+    "min_score": "Wallet score",
 }
 
 
@@ -74,44 +79,67 @@ def format_signal_decided(ev: SignalDecided) -> tuple[str, str]:
 
 
 def format_signal_alert(ev: SignalAlert) -> tuple[str, str]:
-    body = "\n".join([
-        f"Wallet: {_wallet(ev.wallet_label, ev.wallet)}",
-        f"Token: {_token(ev.token_symbol, ev.token_mint)}",
-        f"Tipo: {ev.side.upper()}",
-        f"Precio: {usd(ev.price_usd, 8)}",
-        f"Valor: {usd(ev.value_usd)}",
-        f"Wallet Score: {ev.wallet_score or 0:.0f}/100",
-        f"Origen: {ev.reason}",
-    ])
+    body = "\n".join(
+        [
+            f"Wallet: {_wallet(ev.wallet_label, ev.wallet)}",
+            f"Token: {_token(ev.token_symbol, ev.token_mint)}",
+            f"Tipo: {ev.side.upper()}",
+            f"Precio: {usd(ev.price_usd, 8)}",
+            f"Valor: {usd(ev.value_usd)}",
+            f"Wallet Score: {ev.wallet_score or 0:.0f}/100",
+            f"Origen: {ev.reason}",
+        ]
+    )
     return "🚨 NUEVA OPERACIÓN DETECTADA", body
 
 
 def format_position_closed(ev: PositionClosed) -> tuple[str, str]:
     icon = "🟢" if ev.realized_pnl_usd >= 0 else "🔴"
     ret = f" ({ev.return_pct:+.1f}%)" if ev.return_pct is not None else ""
-    body = "\n".join([f"Token: {_token(ev.token_symbol, ev.token_mint)}", f"Modo: {ev.mode.upper()}",
-                      f"Motivo: {ev.reason}", f"PnL: {usd(ev.realized_pnl_usd)}{ret}"])
+    body = "\n".join(
+        [
+            f"Token: {_token(ev.token_symbol, ev.token_mint)}",
+            f"Modo: {ev.mode.upper()}",
+            f"Motivo: {ev.reason}",
+            f"PnL: {usd(ev.realized_pnl_usd)}{ret}",
+        ]
+    )
     return f"{icon} POSICIÓN CERRADA", body
 
 
 def format_execution_failed(ev: ExecutionFailed) -> tuple[str, str]:
-    body = "\n".join([f"Orden: {ev.client_order_id}", f"Modo: {ev.mode.upper()} · {ev.purpose}",
-                      f"Token: {short(ev.token_mint, 6)}", f"Error: {ev.error}"])
+    body = "\n".join(
+        [
+            f"Orden: {ev.client_order_id}",
+            f"Modo: {ev.mode.upper()} · {ev.purpose}",
+            f"Token: {short(ev.token_mint, 6)}",
+            f"Error: {ev.error}",
+        ]
+    )
     return "⚠️ ERROR DE EJECUCIÓN", body
 
 
 def format_wallet_status(ev: WalletStatusChanged) -> tuple[str, str]:
     old = LABELS_ES.get(ev.old_status or "", ev.old_status or "—")
     new = LABELS_ES.get(ev.new_status, ev.new_status)
-    body = "\n".join([f"Wallet: {_wallet(ev.wallet_label, ev.wallet)}", f"Estado: {old} → {new}", "",
-                      "Motivos:", *[f"• {r}" for r in ev.reasons[:6]]])
+    body = "\n".join(
+        [
+            f"Wallet: {_wallet(ev.wallet_label, ev.wallet)}",
+            f"Estado: {old} → {new}",
+            "",
+            "Motivos:",
+            *[f"• {r}" for r in ev.reasons[:6]],
+        ]
+    )
     return ("📉 WALLET DEGRADADA" if ev.degraded else "ℹ️ CAMBIO DE ESTADO DE WALLET"), body
 
 
 def format_kill_switch(ev: KillSwitchChanged) -> tuple[str, str]:
     if ev.active:
-        return (f"🛑 KILL SWITCH {ev.scope.value.upper()} ACTIVADO",
-                f"Motivo: {ev.reason}\nPor: {ev.actor}\nNo se abrirán nuevas posiciones.")
+        return (
+            f"🛑 KILL SWITCH {ev.scope.value.upper()} ACTIVADO",
+            f"Motivo: {ev.reason}\nPor: {ev.actor}\nNo se abrirán nuevas posiciones.",
+        )
     return f"✅ Kill switch {ev.scope.value.upper()} desactivado", f"Por: {ev.actor}"
 
 

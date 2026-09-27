@@ -78,12 +78,15 @@ class Application:
         if self.serve_api and cfg.api.enabled:
             self._spawn(self._serve_api(), "api")
         status = c.mode.status()
-        c.bus.publish(SystemMessage(
-            title="Sistema iniciado",
-            body=f"Nivel {int(status.level)} ({LEVEL_NAMES_ES[int(status.level)]}), modo "
-                 f"{status.trade_mode.value if status.trade_mode else 'sin ejecución'}, proveedores "
-                 f"{cfg.providers.mode}. Recuperación: {recovery} {requeued}",
-            severity=Severity.INFO))
+        c.bus.publish(
+            SystemMessage(
+                title="Sistema iniciado",
+                body=f"Nivel {int(status.level)} ({LEVEL_NAMES_ES[int(status.level)]}), modo "
+                f"{status.trade_mode.value if status.trade_mode else 'sin ejecución'}, proveedores "
+                f"{cfg.providers.mode}. Recuperación: {recovery} {requeued}",
+                severity=Severity.INFO,
+            )
+        )
         log.info("application_started", level=int(status.level), providers=cfg.providers.mode)
 
     async def _seed_simulated_wallets(self) -> None:
@@ -108,8 +111,7 @@ class Application:
                 log.exception("evaluation_failed")
             self._eval_now.clear()
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._eval_now.wait(),
-                                       timeout=self.c.cfg.analysis.recompute_interval_seconds)
+                await asyncio.wait_for(self._eval_now.wait(), timeout=self.c.cfg.analysis.recompute_interval_seconds)
 
     async def _health_loop(self) -> None:
         c = self.c
@@ -158,10 +160,18 @@ class Application:
 
         cfg = self.c.cfg.api
         app = create_app(self.c, self)
-        config = uvicorn.Config(app, host=cfg.host, port=cfg.port, log_config=None, access_log=False,
-                                proxy_headers=False, server_header=False, date_header=False)
+        config = uvicorn.Config(
+            app,
+            host=cfg.host,
+            port=cfg.port,
+            log_config=None,
+            access_log=False,
+            proxy_headers=False,
+            server_header=False,
+            date_header=False,
+        )
         self._api_server = uvicorn.Server(config)
-        self._api_server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+        self._api_server.install_signal_handlers = lambda: None
         await self._api_server.serve()
 
     async def stop(self) -> None:

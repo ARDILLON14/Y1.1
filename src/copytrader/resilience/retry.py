@@ -24,7 +24,7 @@ class RetryPolicy:
 
     def delay_for(self, attempt: int, rng: random.Random | None = None) -> float:
         """Full-jitter backoff: uniform(0, min(max, base * 2**attempt))."""
-        cap = min(self.max_delay, self.base_delay * (2 ** attempt))
+        cap = min(self.max_delay, self.base_delay * (2**attempt))
         return (rng or random).uniform(0, cap)
 
 
@@ -56,8 +56,7 @@ async def retry_async(
             delay = policy.delay_for(attempt)
             if isinstance(exc, RateLimitedError) and exc.retry_after:
                 delay = max(delay, min(exc.retry_after, policy.max_delay * 4))
-            log.debug("retrying", op=name, attempt=attempt + 1, delay=round(delay, 3),
-                      error=type(exc).__name__)
+            log.debug("retrying", op=name, attempt=attempt + 1, delay=round(delay, 3), error=type(exc).__name__)
             await sleep(delay)
     assert last_exc is not None  # pragma: no cover - loop always returns or raises
     raise last_exc

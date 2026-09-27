@@ -51,24 +51,37 @@ class SizingResult:
     rejected_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"size_usd": round(self.size_usd, 2), "limited_by": self.limited_by, "steps": self.steps,
-                "rejected_reason": self.rejected_reason}
+        return {
+            "size_usd": round(self.size_usd, 2),
+            "limited_by": self.limited_by,
+            "steps": self.steps,
+            "rejected_reason": self.rejected_reason,
+        }
 
 
 def compute_size(inp: SizingInput, cfg: SizingSection) -> SizingResult:
     steps: list[dict[str, Any]] = []
 
     def step(name: str, label: str, size: float, factor: float | None = None) -> float:
-        steps.append({"name": name, "label": label, "factor": None if factor is None else round(factor, 4),
-                      "size_usd": round(size, 2)})
+        steps.append(
+            {
+                "name": name,
+                "label": label,
+                "factor": None if factor is None else round(factor, 4),
+                "size_usd": round(size, 2),
+            }
+        )
         return size
 
     stop = max(inp.stop_distance_pct, 1.0)
     if cfg.method == "fixed":
         size = step("base", "Tamaño fijo", cfg.fixed_size_usd)
     else:
-        size = step("base", f"Riesgo {inp.max_risk_per_trade_pct}% del capital / stop {stop:.0f}%",
-                    inp.sizing_capital_usd * inp.max_risk_per_trade_pct / stop)
+        size = step(
+            "base",
+            f"Riesgo {inp.max_risk_per_trade_pct}% del capital / stop {stop:.0f}%",
+            inp.sizing_capital_usd * inp.max_risk_per_trade_pct / stop,
+        )
 
     score = inp.wallet_score if inp.wallet_score is not None else inp.min_score
     span = max(1e-9, cfg.confidence_full_score - inp.min_score)
@@ -100,8 +113,13 @@ def compute_size(inp: SizingInput, cfg: SizingSection) -> SizingResult:
         ("wallet_risk", "Riesgo por wallet disponible", inp.wallet_risk_capacity_usd * 100 / stop),
     ]
     if inp.liquidity_usd is not None:
-        caps.append(("liquidity", f"{cfg.max_liquidity_fraction_pct}% de la liquidez",
-                     inp.liquidity_usd * cfg.max_liquidity_fraction_pct / 100))
+        caps.append(
+            (
+                "liquidity",
+                f"{cfg.max_liquidity_fraction_pct}% de la liquidez",
+                inp.liquidity_usd * cfg.max_liquidity_fraction_pct / 100,
+            )
+        )
     if inp.is_high_risk:
         caps.append(("high_risk", "Exposición alto riesgo disponible", inp.high_risk_capacity_usd))
     limited_by = "model"
@@ -112,8 +130,9 @@ def compute_size(inp: SizingInput, cfg: SizingSection) -> SizingResult:
 
     result = SizingResult(size_usd=max(0.0, size), limited_by=limited_by, steps=steps)
     if result.size_usd < inp.min_trade_usd:
-        result.rejected_reason = (f"Tamaño {result.size_usd:.2f} USD < mínimo útil {inp.min_trade_usd:.2f} USD "
-                                  f"(limitado por {limited_by})")
+        result.rejected_reason = (
+            f"Tamaño {result.size_usd:.2f} USD < mínimo útil {inp.min_trade_usd:.2f} USD (limitado por {limited_by})"
+        )
     return result
 
 

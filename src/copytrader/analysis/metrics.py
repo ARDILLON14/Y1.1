@@ -156,8 +156,14 @@ def compute_metrics(
     outlier_multiple: float = 10.0,
     forward_win_rates: dict[str, float] | None = None,
 ) -> WalletMetrics:
-    m = WalletMetrics(window=window, computed_at=now, n_swaps=n_swaps, n_buys=n_buys, n_sells=n_sells,
-                      n_unmatched_sells=unmatched_sells)
+    m = WalletMetrics(
+        window=window,
+        computed_at=now,
+        n_swaps=n_swaps,
+        n_buys=n_buys,
+        n_sells=n_sells,
+        n_unmatched_sells=unmatched_sells,
+    )
     trades = sorted(trades, key=lambda t: t.closed_at)
     if weights is not None and len(weights) != len(trades):
         raise ValueError("weights must align with trades")

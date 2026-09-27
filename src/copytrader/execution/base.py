@@ -33,11 +33,11 @@ class Executor(Protocol):
 def quote_price_usd(req: OrderRequest, q: Quote, sol_price_usd: float, sol_decimals: int = 9) -> float | None:
     """USD price per token implied by a quote (quote asset is SOL)."""
     if req.side is Side.BUY:
-        tokens = q.out_amount_raw / 10 ** req.token_decimals
-        usd = q.in_amount_raw / 10 ** sol_decimals * sol_price_usd
+        tokens = q.out_amount_raw / 10**req.token_decimals
+        usd = q.in_amount_raw / 10**sol_decimals * sol_price_usd
     else:
-        tokens = q.in_amount_raw / 10 ** req.token_decimals
-        usd = q.out_amount_raw / 10 ** sol_decimals * sol_price_usd
+        tokens = q.in_amount_raw / 10**req.token_decimals
+        usd = q.out_amount_raw / 10**sol_decimals * sol_price_usd
     return usd / tokens if tokens > 0 else None
 
 

@@ -9,9 +9,10 @@ entries).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import TypeVar
 
 import structlog
 import yaml
@@ -33,6 +34,7 @@ from copytrader.providers.interfaces import (
 from copytrader.providers.solana.constants import SOL_MINT, STABLE_MINTS
 
 log = structlog.get_logger(__name__)
+_T = TypeVar("_T")
 
 
 class TokenCategorizer:
@@ -95,9 +97,11 @@ class TokenInfoService:
         self._on_update = on_update
         cfg = config().providers
         self._market_cache: TTLCache[str, tuple[MarketData, float, datetime]] = TTLCache(
-            max(cfg.token_info_ttl_seconds * 10, 300.0))
+            max(cfg.token_info_ttl_seconds * 10, 300.0)
+        )
         self._static_cache: TTLCache[str, tuple[MintData | None, RiskData | None]] = TTLCache(
-            cfg.token_static_ttl_seconds)
+            cfg.token_static_ttl_seconds
+        )
         self._price_cache: TTLCache[str, tuple[float, float]] = TTLCache(cfg.price_ttl_seconds)
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -139,13 +143,11 @@ class TokenInfoService:
         result = await self.get_many([mint], max_age_seconds=max_age_seconds)
         return result[mint]
 
-    async def get_many(self, mints: Sequence[str], *, max_age_seconds: float | None = None
-                       ) -> dict[str, TokenInfo]:
+    async def get_many(self, mints: Sequence[str], *, max_age_seconds: float | None = None) -> dict[str, TokenInfo]:
         mints = list(dict.fromkeys(mints))
         now_mono = self.clock.monotonic()
         max_age = max_age_seconds if max_age_seconds is not None else self._config().providers.token_info_ttl_seconds
-        stale = [m for m in mints
-                 if not (c := self._market_cache.get(m, now_mono)) or now_mono - c[1] > max_age]
+        stale = [m for m in mints if not (c := self._market_cache.get(m, now_mono)) or now_mono - c[1] > max_age]
         if stale:
             try:
                 fresh = await self.market.token_market(stale)
@@ -159,8 +161,9 @@ class TokenInfoService:
         out: dict[str, TokenInfo] = {}
         for mint, (mint_data, risk_data) in zip(mints, statics, strict=True):
             cached = self._market_cache.get(mint, now_mono)
-            info = self._merge(mint, cached[0] if cached else None, mint_data, risk_data,
-                               market_at=cached[2] if cached else None)
+            info = self._merge(
+                mint, cached[0] if cached else None, mint_data, risk_data, market_at=cached[2] if cached else None
+            )
             out[mint] = info
             if self._on_update is not None:
                 try:
@@ -188,15 +191,22 @@ class TokenInfoService:
             return mint_data, risk_data
 
     @staticmethod
-    async def _safe(coro: object) -> object:
+    async def _safe(coro: Awaitable[_T]) -> _T | None:
         try:
-            return await coro  # type: ignore[misc]
+            return await coro
         except CopyTraderError as exc:
             log.warning("token_static_source_failed", error=str(exc))
             return None
 
-    def _merge(self, mint: str, market: MarketData | None, mint_data: MintData | None,
-               risk: RiskData | None, *, market_at: datetime | None) -> TokenInfo:
+    def _merge(
+        self,
+        mint: str,
+        market: MarketData | None,
+        mint_data: MintData | None,
+        risk: RiskData | None,
+        *,
+        market_at: datetime | None,
+    ) -> TokenInfo:
         # ``fetched_at`` is the age of the *market* data: freshness checks rely on it.
         info = TokenInfo(mint=mint, fetched_at=market_at or self.clock.now())
         sources: list[str] = []

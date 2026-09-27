@@ -29,8 +29,15 @@ class SignalRepo:
     async def get_by_key(self, key: str) -> Signal | None:
         return (await self.s.execute(select(Signal).where(Signal.signal_key == key))).scalar_one_or_none()
 
-    async def list(self, *, limit: int = 100, status: str | None = None, action: str | None = None,
-                   wallet_id: int | None = None, before_id: int | None = None) -> Sequence[Signal]:
+    async def list(
+        self,
+        *,
+        limit: int = 100,
+        status: str | None = None,
+        action: str | None = None,
+        wallet_id: int | None = None,
+        before_id: int | None = None,
+    ) -> Sequence[Signal]:
         stmt = select(Signal).order_by(Signal.id.desc()).limit(limit)
         if status:
             stmt = stmt.where(Signal.status == status)
@@ -43,8 +50,7 @@ class SignalRepo:
         return (await self.s.execute(stmt)).scalars().all()
 
     async def counts_since(self, since: datetime) -> dict[str, int]:
-        stmt = (select(Signal.status, func.count()).where(Signal.created_at >= since)
-                .group_by(Signal.status))
+        stmt = select(Signal.status, func.count()).where(Signal.created_at >= since).group_by(Signal.status)
         return {row[0]: int(row[1]) for row in (await self.s.execute(stmt)).all()}
 
 
@@ -71,9 +77,16 @@ class OrderRepo:
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
     async def in_flight(self, mode: TradeMode | None = None) -> Sequence[Order]:
-        stmt = select(Order).where(Order.status.in_([
-            OrderStatus.CREATED.value, OrderStatus.QUOTED.value, OrderStatus.SIGNED.value,
-            OrderStatus.SUBMITTED.value]))
+        stmt = select(Order).where(
+            Order.status.in_(
+                [
+                    OrderStatus.CREATED.value,
+                    OrderStatus.QUOTED.value,
+                    OrderStatus.SIGNED.value,
+                    OrderStatus.SUBMITTED.value,
+                ]
+            )
+        )
         if mode is not None:
             stmt = stmt.where(Order.mode == mode.value)
         return (await self.s.execute(stmt.order_by(Order.id))).scalars().all()
@@ -84,8 +97,7 @@ class OrderRepo:
             stmt = stmt.where(Order.mode == mode)
         return (await self.s.execute(stmt)).scalars().all()
 
-    async def set_status(self, order_id: int, status: OrderStatus, *, error: str | None = None,
-                         **fields: Any) -> None:
+    async def set_status(self, order_id: int, status: OrderStatus, *, error: str | None = None, **fields: Any) -> None:
         order = await self.get(order_id)
         if order is None:
             return
@@ -107,10 +119,15 @@ class ExecutionRepo:
     async def add(self, values: dict[str, Any]) -> int | None:
         return await insert_ignore(self.s, Execution, values, ["order_id"])
 
-    async def list(self, *, limit: int = 100, mode: str | None = None,
-                   before_id: int | None = None) -> Sequence[tuple[Execution, Order]]:
-        stmt = (select(Execution, Order).join(Order, Order.id == Execution.order_id)
-                .order_by(Execution.id.desc()).limit(limit))
+    async def list(
+        self, *, limit: int = 100, mode: str | None = None, before_id: int | None = None
+    ) -> Sequence[tuple[Execution, Order]]:
+        stmt = (
+            select(Execution, Order)
+            .join(Order, Order.id == Execution.order_id)
+            .order_by(Execution.id.desc())
+            .limit(limit)
+        )
         if mode:
             stmt = stmt.where(Execution.mode == mode)
         if before_id:
@@ -119,7 +136,8 @@ class ExecutionRepo:
 
     async def recent_fees(self, mode: str, since: datetime) -> float:
         stmt = select(func.coalesce(func.sum(Execution.fees_usd), 0.0)).where(
-            Execution.mode == mode, Execution.executed_at >= since)
+            Execution.mode == mode, Execution.executed_at >= since
+        )
         return float((await self.s.execute(stmt)).scalar_one())
 
 
@@ -142,27 +160,33 @@ class PositionRepo:
         return position
 
     async def open_positions(self, mode: TradeMode | None = None) -> Sequence[Position]:
-        stmt = select(Position).where(Position.status.in_([PositionStatus.OPEN.value,
-                                                           PositionStatus.CLOSING.value]))
+        stmt = select(Position).where(Position.status.in_([PositionStatus.OPEN.value, PositionStatus.CLOSING.value]))
         if mode is not None:
             stmt = stmt.where(Position.mode == mode.value)
         return (await self.s.execute(stmt.order_by(Position.id))).scalars().all()
 
     async def open_for_token(self, mode: TradeMode, mint: str) -> Position | None:
-        stmt = (select(Position).where(Position.mode == mode.value, Position.token_mint == mint,
-                                       Position.status.in_([PositionStatus.OPEN.value,
-                                                            PositionStatus.CLOSING.value]))
-                .order_by(Position.id.desc()).limit(1))
+        stmt = (
+            select(Position)
+            .where(
+                Position.mode == mode.value,
+                Position.token_mint == mint,
+                Position.status.in_([PositionStatus.OPEN.value, PositionStatus.CLOSING.value]),
+            )
+            .order_by(Position.id.desc())
+            .limit(1)
+        )
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
     async def open_from_wallet_token(self, wallet_id: int, mint: str) -> Sequence[Position]:
-        stmt = select(Position).where(Position.source_wallet_id == wallet_id, Position.token_mint == mint,
-                                      Position.status.in_([PositionStatus.OPEN.value,
-                                                           PositionStatus.CLOSING.value]))
+        stmt = select(Position).where(
+            Position.source_wallet_id == wallet_id,
+            Position.token_mint == mint,
+            Position.status.in_([PositionStatus.OPEN.value, PositionStatus.CLOSING.value]),
+        )
         return (await self.s.execute(stmt)).scalars().all()
 
-    async def list(self, *, status: str | None = None, mode: str | None = None,
-                   limit: int = 200) -> Sequence[Position]:
+    async def list(self, *, status: str | None = None, mode: str | None = None, limit: int = 200) -> Sequence[Position]:
         stmt = select(Position).order_by(Position.id.desc()).limit(limit)
         if status == "open":
             stmt = stmt.where(Position.status.in_([PositionStatus.OPEN.value, PositionStatus.CLOSING.value]))
@@ -173,26 +197,37 @@ class PositionRepo:
         return (await self.s.execute(stmt)).scalars().all()
 
     async def realized_pnl_total(self, mode: TradeMode) -> float:
-        stmt = select(func.coalesce(func.sum(Position.realized_pnl_usd), 0.0)).where(
-            Position.mode == mode.value)
+        stmt = select(func.coalesce(func.sum(Position.realized_pnl_usd), 0.0)).where(Position.mode == mode.value)
         return float((await self.s.execute(stmt)).scalar_one())
 
     async def closed_since(self, mode: TradeMode, since: datetime) -> Sequence[Position]:
-        stmt = (select(Position).where(Position.mode == mode.value,
-                                       Position.status == PositionStatus.CLOSED.value,
-                                       Position.closed_at >= since).order_by(Position.closed_at))
+        stmt = (
+            select(Position)
+            .where(
+                Position.mode == mode.value, Position.status == PositionStatus.CLOSED.value, Position.closed_at >= since
+            )
+            .order_by(Position.closed_at)
+        )
         return (await self.s.execute(stmt)).scalars().all()
 
     async def last_closed(self, mode: TradeMode, limit: int = 50) -> Sequence[Position]:
-        stmt = (select(Position).where(Position.mode == mode.value,
-                                       Position.status == PositionStatus.CLOSED.value)
-                .order_by(Position.closed_at.desc()).limit(limit))
+        stmt = (
+            select(Position)
+            .where(Position.mode == mode.value, Position.status == PositionStatus.CLOSED.value)
+            .order_by(Position.closed_at.desc())
+            .limit(limit)
+        )
         return (await self.s.execute(stmt)).scalars().all()
 
     async def last_closed_for_token(self, mode: TradeMode, mint: str) -> Position | None:
-        stmt = (select(Position).where(Position.mode == mode.value, Position.token_mint == mint,
-                                       Position.status == PositionStatus.CLOSED.value)
-                .order_by(Position.closed_at.desc()).limit(1))
+        stmt = (
+            select(Position)
+            .where(
+                Position.mode == mode.value, Position.token_mint == mint, Position.status == PositionStatus.CLOSED.value
+            )
+            .order_by(Position.closed_at.desc())
+            .limit(1)
+        )
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
 
@@ -204,13 +239,21 @@ class EquityRepo:
         self.s.add(snap)
 
     async def first_since(self, mode: TradeMode, since: datetime) -> EquitySnapshot | None:
-        stmt = (select(EquitySnapshot).where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts >= since)
-                .order_by(EquitySnapshot.ts).limit(1))
+        stmt = (
+            select(EquitySnapshot)
+            .where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts >= since)
+            .order_by(EquitySnapshot.ts)
+            .limit(1)
+        )
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
     async def last_before(self, mode: TradeMode, before: datetime) -> EquitySnapshot | None:
-        stmt = (select(EquitySnapshot).where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts < before)
-                .order_by(EquitySnapshot.ts.desc()).limit(1))
+        stmt = (
+            select(EquitySnapshot)
+            .where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts < before)
+            .order_by(EquitySnapshot.ts.desc())
+            .limit(1)
+        )
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
     async def peak(self, mode: TradeMode) -> float | None:
@@ -219,8 +262,11 @@ class EquityRepo:
         return float(value) if value is not None else None
 
     async def series(self, mode: TradeMode, since: datetime, max_points: int = 500) -> list[EquitySnapshot]:
-        stmt = (select(EquitySnapshot).where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts >= since)
-                .order_by(EquitySnapshot.ts))
+        stmt = (
+            select(EquitySnapshot)
+            .where(EquitySnapshot.mode == mode.value, EquitySnapshot.ts >= since)
+            .order_by(EquitySnapshot.ts)
+        )
         rows = list((await self.s.execute(stmt)).scalars().all())
         if len(rows) <= max_points:
             return rows

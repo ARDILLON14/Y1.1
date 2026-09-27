@@ -53,8 +53,7 @@ def select_wallets(candidates: list[Candidate], previous: set[str], cfg: Selecti
             if c.score >= cfg.whitelist_min_score:
                 eligible.append(c)
             else:
-                result.reasons[c.address] = (f"Whitelist pero score {c.score:.1f} < "
-                                             f"{cfg.whitelist_min_score:.0f}")
+                result.reasons[c.address] = f"Whitelist pero score {c.score:.1f} < {cfg.whitelist_min_score:.0f}"
         elif c.status is WalletStatus.OBSERVE:
             # Incumbents in OBSERVE are dropped immediately: observation means "do not copy".
             result.reasons[c.address] = "En observación"
@@ -110,8 +109,10 @@ def select_wallets(candidates: list[Candidate], previous: set[str], cfg: Selecti
         elif not meets(c, incumbent=c.address in previous):
             result.reasons[c.address] = f"Score {c.score:.1f} < mínimo {cfg.min_score:.0f}"
         elif rank <= cfg.top_n:
-            result.reasons[c.address] = (f"Rank #{rank}: plaza retenida por una wallet ya seleccionada "
-                                         f"(necesita superarla en {cfg.hysteresis_points:.0f} puntos)")
+            result.reasons[c.address] = (
+                f"Rank #{rank}: plaza retenida por una wallet ya seleccionada "
+                f"(necesita superarla en {cfg.hysteresis_points:.0f} puntos)"
+            )
         else:
             result.reasons[c.address] = f"Fuera del Top {cfg.top_n} (rank #{rank})"
     return result

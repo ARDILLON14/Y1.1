@@ -60,18 +60,31 @@ class ResilientHttp:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get_json(self, url: str, *, params: dict[str, Any] | None = None,
-                       headers: dict[str, str] | None = None,
-                       retry: RetryPolicy | None = None) -> Any:
+    async def get_json(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        retry: RetryPolicy | None = None,
+    ) -> Any:
         return await self.request_json("GET", url, params=params, headers=headers, retry=retry)
 
-    async def post_json(self, url: str, *, json: Any = None, headers: dict[str, str] | None = None,
-                        retry: RetryPolicy | None = None) -> Any:
+    async def post_json(
+        self, url: str, *, json: Any = None, headers: dict[str, str] | None = None, retry: RetryPolicy | None = None
+    ) -> Any:
         return await self.request_json("POST", url, json=json, headers=headers, retry=retry)
 
-    async def request_json(self, method: str, url: str, *, params: dict[str, Any] | None = None,
-                           json: Any = None, headers: dict[str, str] | None = None,
-                           retry: RetryPolicy | None = None) -> Any:
+    async def request_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        retry: RetryPolicy | None = None,
+    ) -> Any:
         async def attempt() -> Any:
             return await self.breaker.call(lambda: self._once(method, url, params, json, headers))
 
@@ -85,38 +98,36 @@ class ResilientHttp:
             self.health.ok(self.name, "http")
         return result
 
-    async def _once(self, method: str, url: str, params: dict[str, Any] | None, json: Any,
-                    headers: dict[str, str] | None) -> Any:
+    async def _once(
+        self, method: str, url: str, params: dict[str, Any] | None, json: Any, headers: dict[str, str] | None
+    ) -> Any:
         await self.bucket.acquire()
         started = time.perf_counter()
         outcome = "error"
         try:
             try:
-                response = await self._client.request(method, url, params=params, json=json,
-                                                      headers=headers)
+                response = await self._client.request(method, url, params=params, json=json, headers=headers)
             except httpx.TimeoutException as exc:
                 outcome = "timeout"
                 raise ProviderError(f"{self.name}: timeout", provider=self.name) from exc
             except httpx.TransportError as exc:
                 outcome = "transport"
-                raise ProviderError(f"{self.name}: {type(exc).__name__}",
-                                    provider=self.name) from exc
+                raise ProviderError(f"{self.name}: {type(exc).__name__}", provider=self.name) from exc
             status = response.status_code
             if status == 429:
                 outcome = "rate_limited"
                 retry_after = _retry_after(response)
                 self.bucket.penalize(retry_after or 1.0)
-                raise RateLimitedError(f"{self.name}: rate limited", provider=self.name,
-                                       retry_after=retry_after)
+                raise RateLimitedError(f"{self.name}: rate limited", provider=self.name, retry_after=retry_after)
             if status >= 500:
                 outcome = f"http_{status}"
-                raise ProviderError(f"{self.name}: HTTP {status}", provider=self.name,
-                                    status_code=status)
+                raise ProviderError(f"{self.name}: HTTP {status}", provider=self.name, status_code=status)
             if status >= 400:
                 outcome = f"http_{status}"
                 detail = response.text[:300]
-                raise ProviderError(f"{self.name}: HTTP {status}: {detail}", provider=self.name,
-                                    retryable=False, status_code=status)
+                raise ProviderError(
+                    f"{self.name}: HTTP {status}: {detail}", provider=self.name, retryable=False, status_code=status
+                )
             try:
                 data = response.json()
             except ValueError as exc:
@@ -125,6 +136,5 @@ class ResilientHttp:
             outcome = "ok"
             return data
         finally:
-            metrics.PROVIDER_LATENCY.labels(provider=self.name).observe(
-                time.perf_counter() - started)
+            metrics.PROVIDER_LATENCY.labels(provider=self.name).observe(time.perf_counter() - started)
             metrics.PROVIDER_REQUESTS.labels(provider=self.name, outcome=outcome).inc()

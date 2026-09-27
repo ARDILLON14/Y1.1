@@ -43,10 +43,10 @@ class EffectiveLimits:
             values["max_risk_per_trade_pct"] = min(values["max_risk_per_trade_pct"], caps.max_risk_per_trade_pct)
             values["max_total_exposure_pct"] = min(values["max_total_exposure_pct"], caps.max_total_exposure_pct)
             values["max_daily_loss_pct"] = min(values["max_daily_loss_pct"], caps.max_daily_loss_pct)
-            values["max_open_positions"] = min(values["max_open_positions"], caps.max_open_positions,
-                                               HL.HARD_LEVEL4_MAX_OPEN_POSITIONS)
-            values["max_trade_usd"] = min(values["max_trade_usd"], caps.max_trade_usd,
-                                          HL.HARD_LEVEL4_MAX_TRADE_USD)
+            values["max_open_positions"] = min(
+                values["max_open_positions"], caps.max_open_positions, HL.HARD_LEVEL4_MAX_OPEN_POSITIONS
+            )
+            values["max_trade_usd"] = min(values["max_trade_usd"], caps.max_trade_usd, HL.HARD_LEVEL4_MAX_TRADE_USD)
         hard_trade = min(HL.HARD_MAX_TRADE_USD, r.capital_usd * HL.HARD_MAX_TRADE_FRACTION)
         if level is OperatingLevel.LIVE_SMALL:
             hard_trade = min(hard_trade, HL.HARD_LEVEL4_MAX_TRADE_USD)

@@ -10,8 +10,7 @@ from collections.abc import Callable
 class TokenBucket:
     """Allows ``rate`` operations per second with bursts up to ``capacity``."""
 
-    def __init__(self, rate: float, capacity: float | None = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, rate: float, capacity: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
         if rate <= 0:
             raise ValueError("rate must be > 0")
         self.rate = rate
