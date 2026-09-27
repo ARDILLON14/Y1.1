@@ -58,6 +58,20 @@ class Secrets(BaseSettings):
                     values[name] = content
         return values
 
+    @model_validator(mode="after")
+    def _empty_is_unset(self) -> Secrets:
+        """Empty placeholder files (Docker secrets not in use) count as 'not configured'."""
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if not isinstance(value, SecretStr):
+                continue
+            raw = value.get_secret_value()
+            if not raw.strip() and name != "database_url":
+                object.__setattr__(self, name, None)
+            elif raw != raw.strip():  # secret files usually end with a newline
+                object.__setattr__(self, name, SecretStr(raw.strip()))
+        return self
+
     def rpc_http_url(self, default: str) -> str:
         return self.solana_rpc_url.get_secret_value() if self.solana_rpc_url else default
 

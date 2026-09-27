@@ -1,0 +1,155 @@
+# Copy Trading Engine — despliegue con Docker Compose
+#
+#   ./scripts/init-secrets.sh           # genera secretos (una vez)
+#   cp config/settings.example.yaml config/settings.yaml
+#   docker compose up -d --build         # niveles 1-3 (análisis, alertas, paper)
+#   docker compose --profile live up -d  # añade el firmador (niveles 4-5)
+#   docker compose --profile monitoring up -d   # Prometheus + Grafana
+#
+# Seguridad de red:
+#   * backend   (interna): app <-> postgres
+#   * signer    (interna, SIN salida a Internet): app <-> firmador
+#   * egress    : solo la app sale a Internet (RPC, Jupiter, DexScreener...)
+#   * Los puertos solo se publican en 127.0.0.1: accede por túnel SSH o VPN.
+name: copytrader
+
+x-hardening: &hardening
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: copytrader
+      POSTGRES_USER: copytrader
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U copytrader -d copytrader"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    shm_size: 256mb
+
+  app:
+    <<: *hardening
+    build: .
+    image: copytrader:latest
+    command: ["run"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      COPYTRADER_CONFIG: /app/config/settings.yaml
+      COPYTRADER_SECRETS_DIR: /run/secrets
+      COPYTRADER__API__HOST: 0.0.0.0
+      COPYTRADER__OBSERVABILITY__METRICS_HOST: 0.0.0.0
+      COPYTRADER__SECURITY__SIGNER_URL: http://signer:8700
+    # The app receives only its own secrets; it never sees the keystore or its passphrase.
+    secrets:
+      - database_url
+      - solana_rpc_url
+      - solana_ws_url
+      - helius_api_key
+      - jupiter_api_key
+      - telegram_bot_token
+      - discord_webhook_url
+      - signer_hmac_key
+      - data_encryption_key
+    volumes:
+      - ./config/settings.yaml:/app/config/settings.yaml:ro
+    tmpfs: [/tmp]
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [backend, signer, egress]
+
+  signer:
+    <<: *hardening
+    image: copytrader:latest
+    profiles: [live]
+    entrypoint: ["python", "-m", "copytrader.signer_service"]
+    command: []
+    environment:
+      SIGNER_KEYSTORE_PATH: /run/secrets/bot_keystore
+      KEYSTORE_PASSPHRASE_FILE: /run/secrets/keystore_passphrase
+      SIGNER_HMAC_KEY_FILE: /run/secrets/signer_hmac_key
+      SIGNER_HMAC_KEY_PREVIOUS_FILE: /run/secrets/signer_hmac_key_previous
+      SIGNER_STATE_FILE: /data/signer_state.json
+      # Independent caps enforced by the signer itself (defence in depth).
+      SIGNER_MAX_NOTIONAL_USD_PER_TX: "${SIGNER_MAX_NOTIONAL_USD_PER_TX:-25}"
+      SIGNER_MAX_NOTIONAL_USD_PER_DAY: "${SIGNER_MAX_NOTIONAL_USD_PER_DAY:-200}"
+      SIGNER_MAX_TX_PER_MINUTE: "${SIGNER_MAX_TX_PER_MINUTE:-10}"
+      SIGNER_MAX_PRIORITY_FEE_LAMPORTS: "${SIGNER_MAX_PRIORITY_FEE_LAMPORTS:-2000000}"
+      SIGNER_MAX_TIP_LAMPORTS: "${SIGNER_MAX_TIP_LAMPORTS:-2000000}"
+    secrets: [bot_keystore, keystore_passphrase, signer_hmac_key, signer_hmac_key_previous]
+    volumes: [signer_state:/data]
+    tmpfs: [/tmp]
+    networks: [signer]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8700/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [monitoring]
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d"]
+    ports: ["127.0.0.1:9090:9090"]
+    networks: [backend, ui]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    secrets: [grafana_admin_password]
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [backend, ui]
+    restart: unless-stopped
+
+networks:
+  backend: {internal: true}
+  signer: {internal: true}
+  egress: {}
+  ui: {}
+
+volumes:
+  pgdata: {}
+  signer_state: {}
+  prometheus_data: {}
+  grafana_data: {}
+
+secrets:
+  postgres_password: {file: ./secrets/postgres_password}
+  database_url: {file: ./secrets/database_url}
+  solana_rpc_url: {file: ./secrets/solana_rpc_url}
+  solana_ws_url: {file: ./secrets/solana_ws_url}
+  helius_api_key: {file: ./secrets/helius_api_key}
+  jupiter_api_key: {file: ./secrets/jupiter_api_key}
+  telegram_bot_token: {file: ./secrets/telegram_bot_token}
+  discord_webhook_url: {file: ./secrets/discord_webhook_url}
+  signer_hmac_key: {file: ./secrets/signer_hmac_key}
+  signer_hmac_key_previous: {file: ./secrets/signer_hmac_key_previous}
+  data_encryption_key: {file: ./secrets/data_encryption_key}
+  keystore_passphrase: {file: ./secrets/keystore_passphrase}
+  bot_keystore: {file: ./secrets/bot.keystore.json}
+  grafana_admin_password: {file: ./secrets/grafana_admin_password}

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Float,
     ForeignKey,
@@ -46,7 +47,7 @@ class Wallet(Base):
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_activity_at: Mapped[datetime | None]
     last_seen_signature: Mapped[str | None] = mapped_column(String(100))
-    last_seen_slot: Mapped[int | None] = mapped_column(Integer)
+    last_seen_slot: Mapped[int | None] = mapped_column(BigInteger)
     backfilled_at: Mapped[datetime | None]
     analyzed_at: Mapped[datetime | None]
 
@@ -99,7 +100,7 @@ class WalletTransaction(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id", ondelete="CASCADE"))
     signature: Mapped[str] = mapped_column(String(100))
-    slot: Mapped[int] = mapped_column(Integer)
+    slot: Mapped[int] = mapped_column(BigInteger)
     block_time: Mapped[datetime]
     token_mint: Mapped[str] = mapped_column(String(64))
     side: Mapped[str] = mapped_column(String(8))
@@ -232,7 +233,7 @@ class Order(Base):
     slippage_bps: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), index=True)
     tx_signature: Mapped[str | None] = mapped_column(String(100), unique=True)
-    last_valid_block_height: Mapped[int | None] = mapped_column(Integer)
+    last_valid_block_height: Mapped[int | None] = mapped_column(BigInteger)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     trigger: Mapped[str | None] = mapped_column(String(40))
     context: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)

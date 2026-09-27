@@ -1,0 +1,6 @@
+# Categorías manuales de tokens (tienen prioridad sobre la heurística automática:
+# launchpad pump.fun/bonk y tramo de market cap). Se usan para el rendimiento por
+# categoría y para la penalización por correlación del sizing.
+tokens:
+  JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: defi
+  DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263: meme

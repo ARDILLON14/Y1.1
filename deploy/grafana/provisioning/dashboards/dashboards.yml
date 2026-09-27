@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: copytrader
+    folder: Copytrader
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

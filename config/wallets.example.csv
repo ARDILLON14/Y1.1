@@ -1,0 +1,6 @@
+# address,label,list,notes
+# list: vacío | whitelist | watchlist | blacklist
+# Las líneas que empiezan por # se ignoran. Máximo wallets.max_wallets (100 por defecto).
+address,label,list,notes
+7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU,Trader A,,encontrado en X/Twitter
+9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM,Trader B,whitelist,confianza alta

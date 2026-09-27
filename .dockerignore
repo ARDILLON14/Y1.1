@@ -1,0 +1,17 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.ruff_cache
+.pytest_cache
+data
+secrets
+.env
+.env.*
+config/settings.yaml
+config/wallets.csv
+config/token_categories.yaml
+tests
+docs
+deploy

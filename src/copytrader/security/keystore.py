@@ -100,7 +100,8 @@ def read_keystore(path: str | Path) -> dict[str, Any]:
     if not p.exists():
         raise SecurityError(f"keystore not found: {p}")
     mode = p.stat().st_mode & 0o777
-    if mode & 0o077:
+    managed = str(p).startswith("/run/secrets/")  # Docker/K8s-managed secret mounts are read-only
+    if mode & 0o022 or (mode & 0o077 and not managed):
         raise SecurityError(f"keystore {p} permissions {oct(mode)} are too open (use chmod 600)")
     data = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(data, dict):

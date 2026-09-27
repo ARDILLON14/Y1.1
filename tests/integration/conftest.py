@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import shutil
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -39,12 +41,39 @@ BASE_TEST_CONFIG: dict[str, Any] = {
 }
 
 
+# Set COPYTRADER_TEST_PG=postgresql+asyncpg://user@/postgres?host=...&port=... to run the
+# integration suite against a real PostgreSQL (databases are cloned from a template).
+PG_ADMIN = os.environ.get("COPYTRADER_TEST_PG")
+
+
+def _pg_url(dbname: str) -> str:
+    assert PG_ADMIN
+    base, _, query = PG_ADMIN.partition("?")
+    return f"{base.rsplit('/', 1)[0]}/{dbname}" + (f"?{query}" if query else "")
+
+
+async def _pg_admin(sql: str) -> None:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql(sql)
+    await engine.dispose()
+
+
+def db_url_for(tmp_path: Any) -> str:
+    if PG_ADMIN:
+        return _pg_url("ct_" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16])
+    return f"sqlite+aiosqlite:///{tmp_path}/test.db"
+
+
 async def make_container(tmp_path: Any, overrides: dict[str, Any] | None = None) -> Container:
-    db = Database(f"sqlite+aiosqlite:///{tmp_path}/test.db")
+    url = db_url_for(tmp_path)
+    db = Database(url)
     await db.create_all()
     raw = deep_merge(BASE_TEST_CONFIG, overrides or {})
     config = ConfigService(raw, DbConfigStore(db))
-    secrets = Secrets(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/test.db")  # type: ignore[call-arg]
+    secrets = Secrets(_env_file=None, database_url=url)  # type: ignore[call-arg]
     c = Container(config, secrets, db=db)
     await c.mode.load()
     await c.kill.load()
@@ -57,10 +86,15 @@ def template_db(tmp_path_factory: Any) -> Path:
     path = tmp_path_factory.mktemp("template")
 
     async def build() -> None:
+        if PG_ADMIN:
+            name = db_url_for(path).split("?")[0].rsplit("/", 1)[1]
+            await _pg_admin(f"DROP DATABASE IF EXISTS {name}")
+            await _pg_admin(f"CREATE DATABASE {name}")
         c = await make_container(path)
         await seed_and_evaluate(c)
-        async with c.db.engine.begin() as conn:
-            await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+        if not PG_ADMIN:
+            async with c.db.engine.begin() as conn:
+                await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
         await c.aclose()
 
     asyncio.run(build())
@@ -68,7 +102,13 @@ def template_db(tmp_path_factory: Any) -> Path:
 
 
 async def seeded_container(tmp_path: Any, template: Path, overrides: dict[str, Any] | None = None) -> Container:
-    shutil.copy(template, Path(tmp_path) / "test.db")
+    if PG_ADMIN:
+        src = db_url_for(template.parent).split("?")[0].rsplit("/", 1)[1]
+        dst = db_url_for(tmp_path).split("?")[0].rsplit("/", 1)[1]
+        await _pg_admin(f"DROP DATABASE IF EXISTS {dst}")
+        await _pg_admin(f"CREATE DATABASE {dst} TEMPLATE {src}")
+    else:
+        shutil.copy(template, Path(tmp_path) / "test.db")
     c = await make_container(tmp_path, overrides)
     await c.refresh_tracking()
     return c

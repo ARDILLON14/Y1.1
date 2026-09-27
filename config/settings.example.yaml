@@ -1,0 +1,324 @@
+# =============================================================================
+#  Configuración central — Copy Trading Engine
+#  Copia este fichero a config/settings.yaml y ajústalo.
+#
+#  * Unidades: *_pct = porcentaje (5 = 5 %), *_usd = dólares, *_bps = puntos básicos
+#    (100 bps = 1 %), *_seconds / *_minutes = tiempo.
+#  * Los SECRETOS (claves API, URLs de RPC con clave, tokens) NO van aquí:
+#    van en variables de entorno / .env / Docker secrets (ver docs/CONFIGURATION.md).
+#  * Todo se valida al arrancar y en cada cambio en caliente. Si algo no es coherente
+#    (p. ej. pérdida diaria > semanal) el sistema no arranca y dice por qué.
+#  * Cualquier clave se puede sobrescribir con variables de entorno:
+#       COPYTRADER__SELECCION... → COPYTRADER__SELECTION__TOP_N=20
+#  * Las secciones marcadas [en caliente] se pueden cambiar desde el dashboard
+#    (Configuración) sin reiniciar; los cambios quedan versionados.
+# =============================================================================
+
+app:
+  # Nivel operativo MÁXIMO permitido (el dashboard puede bajarlo/subirlo hasta aquí):
+  #   1 = solo análisis · 2 = alertas · 3 = paper trading
+  #   4 = dinero real con capital pequeño · 5 = dinero real normal
+  operating_level: 1
+  environment: production
+  chain: solana
+  data_dir: data
+
+wallets:                              # [en caliente]
+  max_wallets: 100                    # MAX_WALLETS
+
+providers:
+  # simulated = mercado sintético sin claves (demo/pruebas) · live = datos reales
+  mode: simulated
+  solana:
+    # URLs públicas por defecto (lentas y limitadas). Las URLs con API key van en los
+    # secretos SOLANA_RPC_URL / SOLANA_WS_URL y tienen prioridad sobre estas.
+    rpc_http_url: https://api.mainnet-beta.solana.com
+    rpc_ws_url: wss://api.mainnet-beta.solana.com
+    # logs_subscribe: funciona con cualquier RPC (1 suscripción por wallet + getTransaction)
+    # helius_transaction_subscribe: Helius Enhanced WebSocket (tx completa en el evento: más rápido)
+    stream: logs_subscribe
+    commitment: confirmed
+    max_subscriptions_per_connection: 100
+    ws_ping_interval_seconds: 20
+    ws_stale_timeout_seconds: 180      # sin mensajes en este tiempo → reconectar
+    reconnect_max_backoff_seconds: 60
+    get_transaction_retries: 8
+    get_transaction_retry_delay_ms: 250
+    catchup_on_reconnect: true         # recupera operaciones perdidas tras una desconexión
+    reconcile_poll_interval_seconds: 300   # red de seguridad (no es el mecanismo principal)
+    backfill_max_signatures_per_wallet: 1000
+    backfill_concurrency: 4
+    rate_limit_per_second: 20
+    timeout_seconds: 10
+  jupiter:
+    quote_url: https://lite-api.jup.ag/swap/v1/quote
+    swap_url: https://lite-api.jup.ag/swap/v1/swap
+    price_url: https://lite-api.jup.ag/price/v3
+    rate_limit_per_second: 1           # lite API: ~60/min. Con API key de pago, súbelo.
+    timeout_seconds: 5
+    restrict_intermediate_tokens: true
+  dexscreener:
+    base_url: https://api.dexscreener.com
+    rate_limit_per_second: 4
+    timeout_seconds: 5
+  rugcheck:
+    enabled: true
+    base_url: https://api.rugcheck.xyz/v1
+    rate_limit_per_second: 2
+    timeout_seconds: 5
+  simulated:                           # solo con mode: simulated
+    seed: 7
+    n_wallets: 40
+    n_tokens: 60
+    history_days: 60
+    realtime_trades_per_minute: 6
+    speedup: 1
+  retry: {max_attempts: 3, base_delay_seconds: 0.2, max_delay_seconds: 3.0}
+  circuit_breaker: {failure_threshold: 5, reset_timeout_seconds: 30}
+  token_info_ttl_seconds: 20           # caché de datos de mercado
+  token_static_ttl_seconds: 3600       # caché de autoridades del mint / informe de riesgo
+  price_ttl_seconds: 3
+  sol_price_history_url: https://data-api.binance.vision/api/v3/klines
+  sol_price_symbol: SOLUSDT
+  token_categories_file: config/token_categories.yaml
+
+analysis:                             # [en caliente]
+  recompute_interval_seconds: 900      # re-evaluación periódica de las ~100 wallets
+  history_days: 180
+  recent_trades: 30                    # ventana "reciente" para detectar deterioro
+  decay_half_life_days: 45             # peso del historial: vida media
+  min_trade_usd: 5                     # ignora operaciones de polvo
+  dust_fraction: 0.01
+  stale_position_days: 30
+  fast_trade_max_minutes: 60           # frontera "rápidas vs largas"
+  holding_buckets_minutes: [5, 60, 1440]
+  min_replicable_hold_seconds: 60
+  regime_trend_threshold_pct: 3        # SOL ±3 % en 24 h = tendencia
+  regime_high_vol_threshold_pct: 6     # SOL ±6 % en 24 h = mercado extremo
+  metrics_snapshot_hours: 24
+  score_snapshot_minutes: 60
+
+scoring:                              # [en caliente]
+  weights:                             # pesos relativos (se normalizan)
+    profitability: 0.18
+    consistency: 0.14
+    drawdown: 0.12
+    win_rate: 0.10
+    profit_factor: 0.10
+    risk: 0.07
+    volatility: 0.05
+    sample_size: 0.06
+    activity: 0.05
+    concentration: 0.06
+    extreme_moves: 0.03
+    replicability: 0.04
+  sample:
+    prior_trades: 30                   # k de la contracción n/(n+k): más alto = más escéptico
+    prior_score: 40                    # hacia dónde se "contraen" las muestras pequeñas
+    confidence_z: 1.645                # límites inferiores al 95 % unilateral
+    profit_factor_prior_trades: 10
+  recent_weight: 0.4                   # peso del comportamiento reciente en el score
+  warning_penalty_points: 5
+  max_warning_penalty_points: 25
+  degradation:
+    min_recent_trades: 15
+    win_rate_drop: 0.15
+    p_value: 0.05
+    recent_profit_factor_floor: 1.0
+    historical_profit_factor_min: 1.3
+    penalty_points: 10
+
+status_rules:                         # [en caliente]  ACTIVA / OBSERVAR / BLOQUEADA
+  min_score_active: 55
+  min_trades_active: 25                # muestra mínima para poder ser ACTIVA
+  max_inactive_days: 14
+  observe_on_degradation: true
+  block_on_critical_flag: true
+  block_below_score: null
+
+detection:                            # [en caliente]  umbrales de comportamiento sospechoso
+  wash_fraction_warning: 0.25
+  wash_fraction_critical: 0.5
+  coordination_window_seconds: 20
+  coordination_min_other_wallets: 2
+  coordination_fraction: 0.35
+  sniper_window_seconds: 120
+  sniper_fraction: 0.4
+  low_liquidity_usd: 20000
+  low_liquidity_fraction: 0.4
+  unreplicable_hold_seconds: 60
+  unreplicable_fraction: 0.4
+  single_trade_share_warning: 0.5
+  single_trade_share_critical: 0.85
+  outlier_return_multiple: 10
+  outlier_pnl_share: 0.6
+  rug_fraction: 0.2
+  high_risk_fraction: 0.4
+  behavior_change_ratio: 3.0
+  hft_trades_per_day: 150
+  inactive_days: 14
+  severity_overrides: {}               # p. ej. {COORDINATED: warning}
+
+selection:                            # [en caliente]
+  top_n: 10                            # Top 5 / 10 / 20… sin tocar código
+  min_score: 55                        # MIN_WALLET_SCORE
+  hysteresis_points: 5                 # una nueva debe superar en 5 puntos a una ya seleccionada
+  rank_buffer: 3
+  whitelist_policy: priority           # priority | normal
+  whitelist_min_score: 40
+  whitelist_counts_toward_top_n: true
+  alert_on_watchlist: true
+  alert_on_observe: false
+  interval_seconds: 300
+
+signals:                              # [en caliente]
+  min_source_value_usd: 20             # ignora compras de origen más pequeñas
+  follow_sells: true
+  late_sell_max_age_minutes: 1440
+
+risk:                                 # [en caliente]  Risk Management Engine
+  capital_usd: 1000                    # capital destinado al bot
+  max_risk_per_trade_pct: 1.0          # MAX_RISK_PER_TRADE: pérdida si salta el stop
+  max_risk_per_wallet_pct: 3.0
+  max_total_exposure_pct: 50
+  max_daily_loss_pct: 5                # MAX_DAILY_LOSS → kill switch diario
+  max_weekly_loss_pct: 10              # → kill switch global
+  max_monthly_loss_pct: 20             # → kill switch global
+  max_open_positions: 10               # MAX_OPEN_POSITIONS
+  max_trade_usd: 100                   # nunca > 25 % del capital (límite absoluto)
+  min_trade_usd: 10                    # por debajo, las comisiones se comen el resultado
+  max_token_exposure_pct: 10
+  max_high_risk_exposure_pct: 10
+  max_slippage_pct: 3.0                # MAX_SLIPPAGE
+  min_liquidity_usd: 50000             # MIN_LIQUIDITY
+  min_market_cap_usd: 100000
+  max_market_cap_usd: 5000000000
+  min_token_age_minutes: 60
+  max_token_risk_score: 60             # 0 seguro … 100 peligroso
+  high_risk_score_threshold: 35
+  high_risk_max_market_cap_usd: 1000000
+  block_mint_authority: true
+  block_freeze_authority: true
+  block_dangerous_extensions: true     # Token-2022: transfer fee, hooks, permanent delegate…
+  allow_add_to_position: false
+  reentry_cooldown_minutes: 60
+  max_consecutive_losses: 6            # 0 desactiva
+  max_execution_errors_per_hour: 5     # 0 desactiva
+  max_data_age_seconds: 30
+  kill_on_reconciliation_mismatch: true
+  reserve_sol: 0.05                    # SOL que nunca se gasta (comisiones)
+  token_blacklist: []
+  token_whitelist_only: false
+  token_whitelist: []
+
+sizing:                               # [en caliente]  position sizing
+  method: risk_based                   # risk_based | fixed
+  fixed_size_usd: 25
+  confidence_min_mult: 0.3             # tamaño con score mínimo vs score alto
+  confidence_full_score: 90
+  target_hourly_vol_pct: 10
+  min_vol_mult: 0.3
+  max_liquidity_fraction_pct: 1.0      # nunca más del 1 % de la liquidez del pool
+  slippage_penalty_start_pct: 1.0
+  min_slippage_mult: 0.4
+  high_risk_mult: 0.5
+  correlation_penalty: 0.25
+
+latency:                              # [en caliente]  protección frente a latencia
+  max_signal_age_seconds: 20           # COPY_DELAY_LIMIT
+  signal_ttl_seconds: 30
+  max_price_deviation_pct: 5.0
+  requote_before_execution: true
+  max_quote_age_seconds: 5
+
+exits:                                # [en caliente]  gestión de salida
+  default_mode: protected              # mirror | protected | smart
+  close_on_source_sell: false          # true = cerrar todo cuando la wallet venda (cualquier modo)
+  mirror_full_exit_threshold: 0.9
+  stop_loss_pct: 20
+  take_profit_levels:
+    - {gain_pct: 50, sell_fraction: 0.5}
+    - {gain_pct: 150, sell_fraction: 1.0}
+  trailing_stop_pct: 15                # null desactiva
+  trailing_activation_pct: 20
+  max_hold_minutes: 1440               # null = sin límite
+  emergency_stop_loss_pct: 50          # se aplica SIEMPRE, también en modo espejo
+  price_poll_seconds: 5
+  stale_price_alert_seconds: 120
+  exit_slippage_pct: 10
+
+execution:                            # [en caliente, salvo las claves bloqueadas]
+  quote_mint: So11111111111111111111111111111111111111112   # [bloqueada] pagar en SOL
+  wallet_public_key: null              # [bloqueada] clave PÚBLICA de la wallet del bot
+  slippage_bps: 150                    # tolerancia en la tx (≤ max_slippage_pct)
+  priority_fee_max_lamports: 1000000
+  priority_level: veryHigh
+  confirm_timeout_seconds: 60
+  rebroadcast_interval_ms: 1500
+  skip_preflight: true
+  jito_tip_lamports: 0
+  entry_max_attempts: 2
+  exit_max_attempts: 5
+  reconcile_interval_seconds: 30
+
+paper:                                # [en caliente]  paper trading
+  simulated_latency_ms: 800
+  extra_slippage_bps: 50
+  network_fee_sol: 0.000105
+  use_real_quotes: true
+
+levels:                               # [en caliente, salvo live_trading_enabled]
+  live_trading_enabled: false          # [bloqueada] 2ª compuerta para dinero real
+  require_arm: true                    # 3ª compuerta: armar desde el dashboard tras el preflight
+  preflight_min_paper_days: 7
+  level4:                              # topes del nivel 4 (se aplica el mínimo con risk.*)
+    max_trade_usd: 20
+    max_open_positions: 3
+    max_total_exposure_pct: 20
+    max_daily_loss_pct: 2
+    max_risk_per_trade_pct: 0.5
+
+notifications:                        # [en caliente]
+  telegram_enabled: false              # token en el secreto TELEGRAM_BOT_TOKEN
+  telegram_chat_id: null
+  discord_enabled: false               # webhook en el secreto DISCORD_WEBHOOK_URL
+  min_severity: info
+  dedupe_window_seconds: 60
+  max_per_minute: 20
+  # events: {trade_rejected: false}    # desactiva tipos concretos
+
+api:
+  enabled: true
+  host: 127.0.0.1                      # NO lo expongas a Internet: usa túnel SSH o VPN
+  port: 8080
+  session_ttl_minutes: 720
+  login_max_attempts: 5
+  login_lockout_minutes: 15
+  rate_limit_per_minute: 240
+  secure_cookies: true                 # false solo si accedes por http://localhost en desarrollo
+  require_totp: false
+
+observability:
+  log_level: INFO
+  json_logs: true
+  metrics_enabled: true
+  metrics_host: 127.0.0.1
+  metrics_port: 9464
+  event_log_retention_days: 90
+  equity_snapshot_seconds: 60
+
+security:
+  signer_mode: none                    # none | remote (recomendado) | local
+  signer_url: http://signer:8700
+  keystore_path: secrets/bot.keystore.json
+  signer_timeout_seconds: 5
+  hmac_max_skew_seconds: 30
+
+backtest:                             # [en caliente]
+  train_days: 30
+  test_days: 7
+  latency_seconds: 3
+  entry_slippage_pct: 2
+  exit_slippage_pct: 2
+  fee_usd_per_trade: 0.05
+  impact_coefficient: 1.0

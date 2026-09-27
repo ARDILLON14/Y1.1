@@ -109,3 +109,14 @@ async def test_service_load_ignores_invalid_stored_overrides():
     svc = ConfigService({}, store)
     cfg = await svc.load()
     assert cfg.risk.max_trade_usd == 100
+
+
+def test_example_settings_file_is_valid_and_complete():
+    from pathlib import Path
+
+    from copytrader.config.loader import read_yaml
+
+    raw = read_yaml(Path(__file__).resolve().parents[2] / "config" / "settings.example.yaml")
+    cfg = build_config(raw)
+    assert set(raw) == set(AppConfig.model_fields)  # every section documented
+    assert cfg.app.operating_level == 1 and not cfg.levels.live_trading_enabled
