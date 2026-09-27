@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Copy Trading Console</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 12 L5 7 L8 9 L15 2' fill='none' stroke='%232a78d6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 12 L5 7 L8 9 L15 2"/></svg>
+      <span>Copy Trading Console</span>
+    </div>
+    <div class="status-strip" id="status-strip" aria-live="polite"></div>
+    <div class="top-actions">
+      <button class="ghost" id="theme-toggle" type="button" title="Cambiar tema" aria-label="Cambiar tema">◐</button>
+      <button class="ghost" id="logout" type="button" hidden>Salir</button>
+    </div>
+  </header>
+  <nav class="tabs" id="nav" aria-label="Secciones">
+    <a href="#/overview">Resumen</a>
+    <a href="#/wallets">Wallets</a>
+    <a href="#/trades">Operaciones</a>
+    <a href="#/signals">Señales</a>
+    <a href="#/positions">Posiciones</a>
+    <a href="#/alerts">Alertas</a>
+    <a href="#/risk">Riesgo</a>
+    <a href="#/backtest">Backtest</a>
+    <a href="#/config">Configuración</a>
+    <a href="#/system">Sistema</a>
+  </nav>
+  <main id="view" tabindex="-1"></main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="modal-root"></div>
+</body>
+</html>

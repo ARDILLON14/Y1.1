@@ -1,0 +1,86 @@
+import { api } from "../api.js";
+import { lineChart } from "../charts.js";
+import { h, table, pct, num, usd, dt, toast, frac, axisUsd } from "../dom.js";
+
+export const refreshSeconds = 10;
+let selected = null;
+let lastRoot = null;
+let running = false;
+
+// Only auto-refresh while a backtest is running (keeps the form intact otherwise).
+export function refresh() { if (running && lastRoot) render(lastRoot); }
+
+export async function render(root) {
+  const runs = await api.get("/backtest");
+  lastRoot = root;
+  running = runs.some((r) => r.status === "running");
+  const f = {
+    train_days: h("input", { type: "number", min: "1", max: "365", placeholder: "30" }),
+    test_days: h("input", { type: "number", min: "1", max: "90", placeholder: "7" }),
+    top_n: h("input", { type: "number", min: "1", max: "100", placeholder: "config" }),
+    latency_seconds: h("input", { type: "number", min: "0", step: "0.5", placeholder: "3" }),
+    entry_slippage_pct: h("input", { type: "number", min: "0", step: "0.1", placeholder: "2" }),
+    exit_mode: h("select", {}, h("option", { value: "" }, "Config"), h("option", { value: "mirror" }, "Espejo"), h("option", { value: "protected" }, "Protegido"), h("option", { value: "smart" }, "Inteligente")),
+  };
+  const start = async (e) => {
+    e.preventDefault();
+    const body = {};
+    for (const [k, el] of Object.entries(f)) if (el.value !== "") body[k] = el.tagName === "SELECT" ? el.value : Number(el.value);
+    try { await api.post("/backtest", body); toast("Backtest iniciado"); render(root); } catch (ex) { toast(ex.message, true); }
+  };
+  const detail = h("div");
+  root.replaceChildren(
+    h("h1", {}, "Backtesting walk-forward"),
+    h("p", { class: "secondary" }, "Cada ventana selecciona wallets usando solo datos anteriores (entrenamiento) y simula la copia en la ventana siguiente (evaluación). Se compara con copiar todas las wallets y con elegirlas solo por PnL."),
+    h("form", { class: "card", onsubmit: start },
+      h("div", { class: "form-grid" },
+        h("label", { class: "field" }, "Días de entrenamiento", f.train_days), h("label", { class: "field" }, "Días de evaluación", f.test_days),
+        h("label", { class: "field" }, "Top N", f.top_n), h("label", { class: "field" }, "Latencia (s)", f.latency_seconds),
+        h("label", { class: "field" }, "Slippage entrada %", f.entry_slippage_pct), h("label", { class: "field" }, "Modo de salida", f.exit_mode)),
+      h("div", { class: "row section" }, h("span", { class: "spacer" }), h("button", { class: "primary", type: "submit" }, "Ejecutar backtest"))),
+    h("div", { class: "card section" }, h("h2", {}, "Ejecuciones"), table([
+      { label: "#", num: true, render: (r) => r.id },
+      { label: "Fecha", render: (r) => dt(r.created_at) },
+      { label: "Estado", render: (r) => r.status },
+      { label: "ROI estrategia", num: true, render: (r) => pct(r.summary?.strategy?.roi_pct, 2, true) },
+      { label: "ROI copiar todo", num: true, render: (r) => pct(r.summary?.copy_all?.roi_pct, 2, true) },
+      { label: "ROI top PnL", num: true, render: (r) => pct(r.summary?.top_pnl?.roi_pct, 2, true) },
+      { label: "DD estrategia", num: true, render: (r) => pct(r.summary?.strategy?.max_drawdown_pct, 2) },
+      { label: "Error", wrap: true, render: (r) => r.error || "" },
+    ], runs, { onRowClick: (r) => { selected = r.id; showRun(detail, r.id); }, empty: "Sin backtests" })),
+    detail);
+  if (selected || runs.find((r) => r.status === "done")) showRun(detail, selected || runs.find((r) => r.status === "done").id);
+}
+
+const NAMES = { strategy: "Estrategia (scoring + riesgo)", copy_all: "Copiar todas", top_pnl: "Top por PnL (ingenuo)" };
+const COLORS = { strategy: "var(--series-1)", copy_all: "var(--series-2)", top_pnl: "var(--series-3)" };
+
+async function showRun(el, id) {
+  const run = await api.get(`/backtest/${id}`);
+  if (!run.results?.results) { el.replaceChildren(); return; }
+  const res = run.results.results;
+  const chart = h("div");
+  el.replaceChildren(h("div", { class: "card section" },
+    h("h2", {}, `Backtest #${id} · ${run.results.period.start.slice(0, 10)} → ${run.results.period.end.slice(0, 10)}`),
+    table([
+      { label: "Estrategia", render: (r) => NAMES[r.k] },
+      { label: "Capital final", num: true, render: (r) => usd(r.final_equity_usd) },
+      { label: "ROI", num: true, render: (r) => pct(r.roi_pct, 2, true) },
+      { label: "Drawdown máx.", num: true, render: (r) => pct(r.max_drawdown_pct, 2) },
+      { label: "Operaciones", num: true, render: (r) => r.n_trades },
+      { label: "Win rate", num: true, render: (r) => frac(r.win_rate, 1) },
+      { label: "Profit factor", num: true, render: (r) => num(r.profit_factor, 2) },
+      { label: "Comisiones", num: true, render: (r) => usd(r.fees_usd) },
+    ], Object.entries(res).map(([k, v]) => ({ k, ...v }))),
+    h("h3", { class: "section" }, "Curvas de capital"), chart,
+    h("h3", { class: "section" }, "Wallets seleccionadas por ventana"),
+    table([
+      { label: "Ventana", render: (w) => `${w.start.slice(0, 10)} → ${w.end.slice(0, 10)}` },
+      { label: "Seleccionadas", wrap: true, render: (w) => w.selected.map((s) => `${s.label || s.wallet.slice(0, 6)} (${s.score})`).join(", ") || "ninguna" },
+      { label: "Operaciones", num: true, render: (w) => w.trades },
+    ], run.results.windows),
+    h("ul", { class: "reasons section small" }, run.results.notes.map((n) => h("li", {}, n)))));
+  lineChart(chart, Object.entries(res).map(([k, v]) => ({
+    name: NAMES[k], color: COLORS[k], points: v.equity_curve.map((p) => ({ x: new Date(p.ts), y: p.equity })),
+  })), { area: false, yFormat: axisUsd });
+}

@@ -527,20 +527,24 @@ class SimulatedFeed:
                     self._seq += 1
                     heapq.heappush(self._pending, (ev.block_time, self._seq, ev))
             while self._pending and self._pending[0][0] <= now:
-                _, _, ev = heapq.heappop(self._pending)
-                if ev.signature == "pending":
+                due, seq, ev = heapq.heappop(self._pending)
+                if ev.signature == "pending":  # sell whose price is only known at exit time
                     real = self.m.materialize_sell(ev)
                     if real is None:
                         continue
                     ev = real
+                if ev.detected_at is None:
+                    # emulate network/indexing latency: deliver it once "detected"
+                    lat = float(self.m.rng.uniform(*self._latency))
+                    ev = _with(ev, detected_at=ev.block_time + timedelta(seconds=lat))
+                    heapq.heappush(self._pending, (ev.detected_at, seq, ev))
+                    continue
                 if ev.wallet not in self._wallets:
                     continue
-                lat = float(self.m.rng.uniform(*self._latency))
-                detected = ev.block_time + timedelta(seconds=lat)
                 self.m.history.setdefault(ev.wallet, []).append(ev)
-                await on_swap(_with(ev, detected_at=detected))
+                await on_swap(ev)
             try:
-                await asyncio.wait_for(self._stopped.wait(), timeout=1.0)
+                await asyncio.wait_for(self._stopped.wait(), timeout=0.25)
             except TimeoutError:
                 pass
 

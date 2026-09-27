@@ -103,6 +103,10 @@ def test_selection_hysteresis_keeps_incumbent():
     assert "low" not in res.addresses  # below min − hysteresis? 47 < 45? no: rank 4 > top_n + buffer
     res2 = select_wallets(cands, set(), cfg)
     assert res2.addresses == {"a", "new"}
+    assert "plaza retenida" in res.reasons["new"]
+    # a newcomer that is clearly better (≥ hysteresis points) does displace the incumbent
+    better = [_cand("a", 90), _cand("new", 86), _cand("inc", 79)]
+    assert select_wallets(better, {"inc"}, cfg).addresses == {"a", "new"}
 
 
 def test_selection_whitelist_priority_and_min_score():

@@ -81,11 +81,23 @@ def select_wallets(candidates: list[Candidate], previous: set[str], cfg: Selecti
         whitelisted_extra = [c for c in ranked if c.list_type is ListType.WHITELIST]
         pool = [c for c in ranked if c.list_type is not ListType.WHITELIST]
 
-    keep = [c for c in pool if c.address in previous and result.ranks[c.address] <= cfg.top_n + cfg.rank_buffer
-            and meets(c, incumbent=True)][: cfg.top_n]
-    keep_set = {c.address for c in keep}
-    newcomers = [c for c in pool if c.address not in keep_set and meets(c, incumbent=False)]
-    chosen = sorted(keep + newcomers[: max(0, cfg.top_n - len(keep))], key=lambda c: result.ranks[c.address])
+    # 1) plain ranking: the best ``top_n`` eligible wallets
+    qualified = [c for c in pool if meets(c, incumbent=c.address in previous)]
+    chosen = qualified[: cfg.top_n]
+    # 2) hysteresis: an incumbent that slipped just below the cut keeps its seat unless the
+    #    newcomer holding it is better by at least ``hysteresis_points``.
+    kept_by_hysteresis: set[str] = set()
+    for inc in qualified:
+        if inc.address not in previous or inc in chosen or result.ranks[inc.address] > cfg.top_n + cfg.rank_buffer:
+            continue
+        newcomers = [c for c in chosen if c.address not in previous and c.list_type is not ListType.WHITELIST]
+        if not newcomers:
+            break
+        weakest = min(newcomers, key=lambda c: c.score)
+        if weakest.score < inc.score + cfg.hysteresis_points:
+            chosen[chosen.index(weakest)] = inc
+            kept_by_hysteresis.add(inc.address)
+    chosen.sort(key=lambda c: result.ranks[c.address])
     result.selected = whitelisted_extra + chosen
 
     selected_set = result.addresses
@@ -93,10 +105,13 @@ def select_wallets(candidates: list[Candidate], previous: set[str], cfg: Selecti
         rank = result.ranks[c.address]
         if c.address in selected_set:
             tag = " (whitelist)" if c.list_type is ListType.WHITELIST else ""
-            tag += " (se mantiene por histéresis)" if c.address in keep_set and rank > cfg.top_n else ""
+            tag += " (se mantiene por histéresis)" if c.address in kept_by_hysteresis else ""
             result.reasons[c.address] = f"Seleccionada: rank #{rank}, score {c.score:.1f}{tag}"
         elif not meets(c, incumbent=c.address in previous):
             result.reasons[c.address] = f"Score {c.score:.1f} < mínimo {cfg.min_score:.0f}"
+        elif rank <= cfg.top_n:
+            result.reasons[c.address] = (f"Rank #{rank}: plaza retenida por una wallet ya seleccionada "
+                                         f"(necesita superarla en {cfg.hysteresis_points:.0f} puntos)")
         else:
             result.reasons[c.address] = f"Fuera del Top {cfg.top_n} (rank #{rank})"
     return result

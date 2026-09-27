@@ -109,7 +109,9 @@ class CopyPipeline:
         now = self.clock.now()
         trade_mode: TradeMode | None = state["mode"]
         self._check(checks, CheckResult("level", "Nivel operativo permite ejecutar", trade_mode is not None,
-                                        int(self.mode.level), message=self.mode.live_block_reason() or ""))
+                                        int(self.mode.level),
+                                        message=f"nivel {int(self.mode.level)}, modo "
+                                                f"{trade_mode.value.upper() if trade_mode else 'sin ejecución'}"))
         assert trade_mode is not None
 
         # 1. wallet eligibility (fresh state, the selection may have changed since detection)
