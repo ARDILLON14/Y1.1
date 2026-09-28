@@ -47,7 +47,7 @@ from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
 from copytrader.risk.engine import EntryRequest, RiskEngine
-from copytrader.signals.engine import SignalContext, SignalEngine, copyable
+from copytrader.signals.engine import SignalContext, SignalEngine, copyable, signal_age_limit
 
 log = structlog.get_logger(__name__)
 _COST_LABEL = "Coste de red de ida y vuelta asumible"
@@ -168,17 +168,18 @@ class CopyPipeline:
             ),
         )
 
-        # 10a. delay (cheap check first)
+        # 10a. delay (cheap check first), adapted to how long this wallet holds its trades
         age = (now - swap.block_time).total_seconds()
+        max_age, why = signal_age_limit(cfg, info.median_hold_seconds)
         self._check(
             checks,
             CheckResult(
                 "signal_age",
                 "Retraso de la señal aceptable",
-                age <= cfg.latency.max_signal_age_seconds,
+                age <= max_age,
                 round(age, 2),
-                cfg.latency.max_signal_age_seconds,
-                f"{age:.1f}s (máx {cfg.latency.max_signal_age_seconds:.0f}s)",
+                round(max_age, 2),
+                f"{age:.1f}s (máx {max_age:.1f}s: {why})",
             ),
             SignalStatus.EXPIRED,
         )

@@ -135,6 +135,14 @@ class AnalysisSection(Section):
     regime_trend_threshold_pct: float = Field(3.0, gt=0)
     regime_high_vol_threshold_pct: float = Field(6.0, gt=0)
     metrics_snapshot_hours: float = Field(24.0, gt=0, description="new metrics row at most every N hours")
+    # Copy replication: estimate what copying each trade would have returned (analysis/replication.py).
+    replication_enabled: bool = True
+    # None = median latency measured on our own recent copies (≥ replication_min_latency_samples),
+    # falling back to backtest.latency_seconds.
+    replication_latency_seconds: float | None = Field(None, ge=0)
+    replication_min_latency_samples: int = Field(20, ge=1)
+    # None = the size the risk-based sizing would use (capital × risk per trade / stop loss, capped).
+    replication_size_usd: float | None = Field(None, gt=0)
     score_snapshot_minutes: float = Field(60.0, gt=0, description="new score row at most every N minutes")
 
 
@@ -152,6 +160,7 @@ class ScoringWeights(Section):
     concentration: float = Field(0.06, ge=0)
     extreme_moves: float = Field(0.03, ge=0)
     replicability: float = Field(0.04, ge=0)
+    copy_edge: float = Field(0.18, ge=0)  # estimated return of COPYING the wallet (latency, impact, costs)
 
     @model_validator(mode="after")
     def _non_zero(self) -> ScoringWeights:
@@ -165,6 +174,9 @@ class ScoringBounds(Section):
 
     expectancy_lo_pct: float = -5.0
     expectancy_hi_pct: float = 25.0
+    # Copied returns are structurally lower than the wallet's own (latency, impact, costs).
+    copy_expectancy_lo_pct: float = -5.0
+    copy_expectancy_hi_pct: float = 15.0
     roi_lo_pct: float = -20.0
     roi_hi_pct: float = 100.0
     win_rate_lo: float = 0.30
@@ -212,6 +224,8 @@ class StatusRulesSection(Section):
     observe_on_degradation: bool = True
     block_on_critical_flag: bool = True
     block_below_score: float | None = Field(None, ge=0, le=100)
+    # OBSERVE a wallet whose estimated copied return per trade is below this (%). None disables.
+    min_copy_expectancy_pct: float | None = 0.0
 
 
 # ---------------------------------------------------------------------- detection
@@ -344,6 +358,11 @@ class LatencySection(Section):
     max_price_deviation_pct: float = Field(5.0, gt=0, le=100)
     requote_before_execution: bool = True
     max_quote_age_seconds: float = Field(5.0, gt=0)
+    # Per-wallet delay limit: min(max_signal_age_seconds, max(min_signal_age_seconds,
+    # max_age_fraction_of_hold × the wallet's median holding time)). A scalper needs a fresh signal.
+    per_wallet_max_age: bool = True
+    max_age_fraction_of_hold: float = Field(0.1, gt=0, le=1)
+    min_signal_age_seconds: float = Field(2.0, gt=0)
 
 
 class TakeProfitLevel(Section):

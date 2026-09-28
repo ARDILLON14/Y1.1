@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from copytrader.core.clock import utcnow
-from copytrader.core.types import OrderStatus, PositionStatus, TradeMode
+from copytrader.core.types import OrderPurpose, OrderStatus, PositionStatus, TradeMode
 from copytrader.db.models import EquitySnapshot, EventLog, Execution, Order, Position, Signal
 from copytrader.db.repositories._util import insert_ignore
 
@@ -157,6 +157,24 @@ class ExecutionRepo:
         if before_id:
             stmt = stmt.where(Execution.id < before_id)
         return [(r[0], r[1]) for r in (await self.s.execute(stmt)).all()]
+
+    async def entry_latencies(self, limit: int = 200) -> Sequence[float]:
+        """Seconds from the source's trade to our entry fill, for the most recent copied entries."""
+        stmt = (
+            select(Execution.executed_at, Signal.source_block_time)
+            .join(Order, Order.id == Execution.order_id)
+            .join(Signal, Signal.id == Order.signal_id)
+            .where(Order.purpose == OrderPurpose.ENTRY.value)
+            .order_by(Execution.id.desc())
+            .limit(limit)
+        )
+        out: list[float] = []
+        for executed_at, source_time in (await self.s.execute(stmt)).all():
+            if executed_at is not None and source_time is not None:
+                seconds = (executed_at - source_time).total_seconds()
+                if seconds >= 0:
+                    out.append(seconds)
+        return out
 
     async def recent_fees(self, mode: str, since: datetime) -> float:
         stmt = select(func.coalesce(func.sum(Execution.fees_usd), 0.0)).where(

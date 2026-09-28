@@ -38,8 +38,15 @@ from copytrader.core.types import (
     WalletStatus,
 )
 from copytrader.db.base import Database
-from copytrader.db.models import Signal
-from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo, WalletRepo
+from copytrader.db.models import Signal, WalletMetric
+from copytrader.db.repositories import (
+    AnalyticsRepo,
+    EventLogRepo,
+    PositionRepo,
+    SignalRepo,
+    TransactionRepo,
+    WalletRepo,
+)
 from copytrader.db.repositories.wallets import row_to_swap
 from copytrader.execution.mode import ModeController
 from copytrader.observability import metrics
@@ -61,6 +68,38 @@ class WalletInfo:
     # False for a wallet that is no longer tracked but still has open copied
     # positions: it keeps being watched, only to mirror its exits.
     tracked: bool = True
+    median_hold_seconds: float | None = None  # sets how fresh a signal from it must be
+
+
+def signal_age_limit(cfg: AppConfig, median_hold_seconds: float | None) -> tuple[float, str]:
+    """Max acceptable delay for a signal from this wallet, and why.
+
+    The global ``max_signal_age_seconds`` is a ceiling. A wallet that holds for
+    one minute is not copyable 15 s late, so the limit shrinks to a fraction of
+    its median holding time (never below ``min_signal_age_seconds``).
+    """
+    lat = cfg.latency
+    limit = lat.max_signal_age_seconds
+    if lat.per_wallet_max_age and median_hold_seconds:
+        per_wallet = max(lat.min_signal_age_seconds, lat.max_age_fraction_of_hold * median_hold_seconds)
+        if per_wallet < limit:
+            return per_wallet, (
+                f"{lat.max_age_fraction_of_hold:.0%} de su holding mediano de {_duration(median_hold_seconds)}"
+            )
+    return limit, "límite global"
+
+
+def _duration(seconds: float) -> str:
+    if seconds < 120:
+        return f"{seconds:.0f}s"
+    if seconds < 7200:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+def _median_hold_seconds(metric: WalletMetric | None) -> float | None:
+    minutes = (metric.data or {}).get("median_holding_minutes") if metric is not None else None
+    return float(minutes) * 60 if minutes else None
 
 
 def copyable(info: WalletInfo) -> bool:
@@ -126,6 +165,7 @@ class SignalEngine:
         """
         async with self.db.session() as s:
             rows = list(await WalletRepo(s).list())
+            metrics = await AnalyticsRepo(s).latest_metrics_all("all")
             tracked_ids = {w.id for w in rows}
             open_ids = {p.source_wallet_id for p in await PositionRepo(s).open_positions() if p.source_wallet_id}
             for wallet_id in open_ids - tracked_ids:
@@ -143,6 +183,7 @@ class SignalEngine:
                 selected=w.selected and w.is_tracked,
                 exit_mode_override=ExitMode(w.exit_mode_override) if w.exit_mode_override else None,
                 tracked=w.id in tracked_ids,
+                median_hold_seconds=_median_hold_seconds(metrics.get(w.id)),
             )
             for w in rows
         }

@@ -14,6 +14,7 @@ from copytrader.api.deps import client_ip, ctx, session, write_session
 from copytrader.collector.wallet_collector import parse_list_type
 from copytrader.core.types import ExitMode, ListType
 from copytrader.db.repositories import AnalyticsRepo, AuditRepo, PositionRepo, TransactionRepo, WalletRepo
+from copytrader.signals.engine import signal_age_limit
 
 router = APIRouter(tags=["wallets"])
 
@@ -138,7 +139,14 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
         ],
         "n_transactions": n_tx,
         "positions": [ser.position(p) for p in positions],
+        "signal_age_limit": _signal_age(c.cfg, m_all.data if m_all else None),
     }
+
+
+def _signal_age(cfg: Any, data: dict[str, Any] | None) -> dict[str, Any]:
+    minutes = (data or {}).get("median_holding_minutes")
+    limit, reason = signal_age_limit(cfg, float(minutes) * 60 if minutes else None)
+    return {"seconds": round(limit, 2), "reason": reason}
 
 
 class WalletPatch(BaseModel):

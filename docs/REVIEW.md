@@ -141,25 +141,32 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | El alquiler de la cuenta de cada token (~0,002 SOL) nunca se recuperaba | Cierre automático de cuentas vacías tras vender, verificado por la política del firmador |
 | Operaciones cuyo coste fijo se come la ventaja | Filtro `risk.max_round_trip_cost_pct` (3 % por defecto) con explicación en la decisión |
 | Las cotizaciones y swaps de órdenes compartían el límite de 1 petición/s de Jupiter con la consulta de precios y podían esperar detrás de ella | Rate limit con prioridades: ejecución antes que precios en segundo plano |
+| Las wallets se puntuaban por su PnL a sus propios precios, no por lo que puede capturar quien las copia | **PnL replicado** por wallet (latencia medida, impacto de su compra y la tuya, deriva durante el retraso, slippage, comisiones): componente `copy_edge` del score y regla que pasa a OBSERVAR las wallets no replicables |
+| Un único retraso máximo de señal (20 s) para scalpers y wallets de horas | Retraso máximo por wallet según su holding mediano |
+
+Efecto medido en el mercado simulado (walk-forward, mismos datos): con los
+costes reales, la selección anterior elegía también scalpers y una wallet
+aleatoria y **perdía un 12,7 %** (profit factor 0,81); con la replicación
+selecciona solo las wallets con ventaja copiable y **gana un 19,2 %** con un
+drawdown máximo del 2,8 % (profit factor 1,83), por encima de las referencias
+"copiar todo" (−36 %) y "elegir por PnL" (+15,6 %). Es un mercado sintético:
+confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
 
 **Pendiente, por impacto esperado**
 
-1. **PnL replicado por wallet**: puntuar cada wallet por lo que habrías ganado
-   entrando con tu latencia real, tu tamaño y tus costes, y retraso máximo de
-   señal por wallet según su tiempo típico de holding.
-2. **Medición**: seguimiento de las señales rechazadas/caducadas (qué habría
+1. **Medición**: seguimiento de las señales rechazadas/caducadas (qué habría
    pasado), atribución del resultado (por wallet, salida, retraso, comisiones)
    y varias configuraciones en paper en paralelo.
-3. **Aprendizaje propio**: comparar el resultado de copiar a cada wallet con el
+2. **Aprendizaje propio**: comparar el resultado de copiar a cada wallet con el
    suyo y degradar las que no se pueden replicar; periodo de prueba en paper
    para wallets nuevas.
-4. **Filtros por señal**: valor esperado neto de costes, confluencia de wallets
+3. **Filtros por señal**: valor esperado neto de costes, confluencia de wallets
    independientes, concentración de holders, liquidez bloqueada, presión
    compradora, simulación de venta (honeypot), régimen de mercado.
-5. **Ejecución**: stream de menor latencia, priority fee dinámica, Jito.
-6. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
+4. **Ejecución**: stream de menor latencia, priority fee dinámica, Jito.
+5. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
    por caída de liquidez o por ventas de varias wallets seguidas.
-7. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
+6. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
    evaluar stop loss ni take profit entre operaciones).
 
 ## 7. Conclusión

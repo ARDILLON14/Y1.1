@@ -42,6 +42,7 @@ COMPONENT_LABELS = {
     "concentration": "Diversificación del beneficio",
     "extreme_moves": "Mercado extremo",
     "replicability": "Replicabilidad",
+    "copy_edge": "Ventaja copiable (estimada)",
 }
 
 
@@ -129,6 +130,18 @@ def compute_components(m: WalletMetrics, b: ScoringBounds, k: float) -> dict[str
     else:
         comps["extreme_moves"] = (None, {"n": (ext or {}).get("n", 0)})
     comps["replicability"] = (m.replicable_frac, {"replicable_frac": m.replicable_frac})
+    # What copying the wallet would return with our latency, size and costs (lower bound + mean).
+    copy_lb = norm01(m.copy_expectancy_lb_pct, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
+    copy_mean = norm01(m.copy_expectancy_pct, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
+    comps["copy_edge"] = (
+        None if copy_lb is None or copy_mean is None else 0.5 * copy_lb + 0.5 * copy_mean,
+        {
+            "copy_expectancy_pct": m.copy_expectancy_pct,
+            "copy_expectancy_lb_pct": m.copy_expectancy_lb_pct,
+            "copy_cost_pct": m.copy_cost_pct,
+            "n": m.copy_n,
+        },
+    )
     return comps
 
 

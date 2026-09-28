@@ -24,7 +24,9 @@ class _Cycle:
     opened_at: datetime
     entry_price_usd: float
     liquidity_at_entry: float | None
+    entry_value: float = 0.0
     qty: float = 0.0
+    sold_qty: float = 0.0
     cost: float = 0.0  # remaining cost basis
     cycle_cost: float = 0.0  # total cost of every buy in the cycle
     proceeds: float = 0.0
@@ -78,6 +80,7 @@ def reconstruct(
                     opened_at=sw.block_time,
                     entry_price_usd=sw.value_usd / sw.token_amount,
                     liquidity_at_entry=sw.liquidity_usd,
+                    entry_value=sw.value_usd,
                 )
                 cycles[sw.token_mint] = cyc
             cyc.qty += sw.token_amount
@@ -100,6 +103,7 @@ def reconstruct(
         cyc.proceeds += matched_proceeds
         cyc.cost -= cost_portion
         cyc.qty -= sell_qty
+        cyc.sold_qty += sell_qty
         cyc.n_sells += 1
         cyc.last_trade_at = sw.block_time
         deployed = max(0.0, deployed - cost_portion)
@@ -125,6 +129,8 @@ def reconstruct(
                     category=category_of(sw.token_mint) if category_of else None,
                     liquidity_at_entry_usd=cyc.liquidity_at_entry,
                     regime=regime_of(cyc.opened_at) if regime_of else None,
+                    entry_value_usd=cyc.entry_value,
+                    exit_price_usd=cyc.proceeds / cyc.sold_qty if cyc.sold_qty > 0 else None,
                 )
             )
             del cycles[sw.token_mint]

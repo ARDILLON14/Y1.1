@@ -31,6 +31,7 @@ from typing import Any
 
 from copytrader.analysis import stats
 from copytrader.analysis.analyzer import PriceAt, TokenContext, WalletAnalyzer
+from copytrader.analysis.replication import ReplicationParams, build_params
 from copytrader.config.models import AppConfig
 from copytrader.core.models import SwapEvent
 from copytrader.core.types import ExitMode, ListType, Side
@@ -132,12 +133,13 @@ class Backtester:
         tokens: dict[str, TokenContext],
         previous: set[str],
         top_n: int,
+        replication: ReplicationParams | None = None,
     ) -> tuple[set[str], dict[str, float], dict[str, float]]:
         cfg = self._config()
         lo = t - timedelta(days=train_days)
         window = {w: [s for s in ss if lo <= s.block_time < t] for w, ss in swaps.items()}
         analyses = {
-            w: self.analyzer.analyze(i, w, ss, now=t, tokens=tokens, current_prices={})
+            w: self.analyzer.analyze(i, w, ss, now=t, tokens=tokens, current_prices={}, replication=replication)
             for i, (w, ss) in enumerate(window.items())
         }
         coordination = CoordinationIndex(
@@ -335,6 +337,11 @@ class Backtester:
             return {"error": "sin datos"}
         first, last = min(all_times), max(all_times)
         start = params.start or first + timedelta(days=params.train_days)
+        sol_price = next((sw.sol_price_usd for ss in swaps.values() for sw in ss if sw.sol_price_usd), None)
+        # Selection uses the same "what would copying it return" estimate as the live system.
+        replication = build_params(
+            self._config(), latency_seconds=params.latency_seconds, sol_price_usd=sol_price, latency_source="backtest"
+        )
         end = params.end or last
         if start >= end:
             return {"error": "rango insuficiente: amplía el historial o reduce train_days"}
@@ -349,7 +356,9 @@ class Backtester:
         t = start
         while t < end:
             t1 = min(end, t + timedelta(days=params.test_days))
-            selected, scores, pnl = self._select(swaps, lists, t, params.train_days, tokens, previous, params.top_n)
+            selected, scores, pnl = self._select(
+                swaps, lists, t, params.train_days, tokens, previous, params.top_n, replication
+            )
             previous = selected
             eligible = {w for w in swaps if lists.get(w) is not ListType.BLACKLIST}
             naive = set(sorted(eligible, key=lambda w: pnl.get(w, 0.0), reverse=True)[: params.top_n])

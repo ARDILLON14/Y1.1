@@ -253,6 +253,8 @@ class ClosedTrade:
     category: str | None = None
     liquidity_at_entry_usd: float | None = None
     regime: str | None = None
+    entry_value_usd: float | None = None  # value of the FIRST buy (the one a copier follows)
+    exit_price_usd: float | None = None  # average price of every sell in the round trip
 
     @property
     def is_win(self) -> bool:

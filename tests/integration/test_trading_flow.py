@@ -271,3 +271,37 @@ async def test_entries_eaten_by_network_costs_are_rejected(tmp_path, template_db
     finally:
         await c.signals.stop()
         await c.aclose()
+
+
+async def test_replication_uses_our_measured_latency_once_there_are_copies(tmp_path, template_db):
+    c = await seeded_container(tmp_path, template_db, {"analysis": {"replication_min_latency_samples": 1}})
+    try:
+        assert (await c.cycle.replication_params()).latency_source == "default"  # no copies yet
+        c.signals.start()
+        wallet = await _selected_wallet(c)
+        await c.signals.on_swap(live_swap(c, wallet.address, good_token(c), Side.BUY, 500.0, sig="lat", age_seconds=2))
+        await c.signals.drain()
+        params = await c.cycle.replication_params()
+        assert params.latency_source == "measured"
+        assert 2.0 <= params.latency_seconds < 10.0  # source trade 2 s old + our pipeline and fill
+        report = await c.cycle.run()
+        assert report.replication["latency_source"] == "measured"
+    finally:
+        await c.signals.stop()
+        await c.aclose()
+
+
+async def test_signal_from_a_fast_wallet_must_be_fresher(container):
+    from dataclasses import replace
+
+    c = container
+    c.signals.start()
+    wallet = await _selected_wallet(c)
+    info = c.signals.wallet(wallet.address)
+    assert info is not None and info.median_hold_seconds  # loaded from its metrics
+    c.signals._wallets[wallet.address] = replace(info, median_hold_seconds=30.0)  # a 30-second scalper
+    await c.signals.on_swap(live_swap(c, wallet.address, good_token(c), Side.BUY, 500.0, sig="fast", age_seconds=5))
+    await c.signals.drain()
+    sig = (await _signals(c))[-1]
+    assert sig.status == SignalStatus.EXPIRED.value
+    assert "máx 3.0s" in sig.reason and "holding mediano de 30s" in sig.reason

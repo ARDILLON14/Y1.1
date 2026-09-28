@@ -111,6 +111,25 @@ considera operación rápida (`fast_trade_max_minutes`) y umbrales de régimen d
 mercado (tendencia y volatilidad de SOL). `recompute_interval_seconds` marca
 cada cuánto se re-evalúan todas las wallets.
 
+**Replicación** (`replication_*`): para cada operación cerrada de la wallet se
+estima qué habrías ganado **copiándola**, porque su PnL está medido a sus
+propios precios y el tuyo no:
+
+- llegas `latencia` segundos tarde: pierdes esa fracción del movimiento de la
+  operación (todo, si la wallet mantiene menos tiempo que tu latencia);
+- su compra ya movió el precio del pool (impacto ≈ su tamaño / la mitad de la
+  liquidez) y tú pagas además tu propio impacto y el slippage de `paper`;
+- vendes después de cada venta suya, cuando su venta ya bajó el precio;
+- pagas las comisiones de red de la ida y vuelta ([§6](#6-costes-de-red)).
+
+La latencia es la **mediana medida en tus copias recientes** en cuanto hay
+`replication_min_latency_samples`; antes se usa `backtest.latency_seconds`. El
+tamaño es el que daría el sizing por riesgo (`replication_size_usd` lo fija).
+La liquidez se toma de la operación o del token y nunca se supone por debajo de
+`risk.min_liquidity_usd`. Es una estimación sin histórico de precios tick a
+tick: sirve para ordenar wallets por lo que tú puedes replicar, no como promesa.
+El detalle de cada wallet la muestra en la tarjeta *Si la copias*.
+
 ### `scoring`
 - `weights`: peso relativo de cada componente (se normalizan). Ninguno es "PnL
   a secas": rentabilidad ajustada, consistencia, drawdown, win rate (límite
@@ -125,12 +144,17 @@ cada cuánto se re-evalúan todas las wallets.
   significativa, profit factor reciente bajo el suelo…) y su penalización.
 - Penalización por avisos de detección: `warning_penalty_points` por aviso,
   hasta `max_warning_penalty_points`. Un aviso crítico limita el score a 20.
+- `copy_edge` (peso 0,18 por defecto): ventaja estimada **al copiarla**
+  (retorno medio replicado y su límite inferior, escalados entre
+  `bounds.copy_expectancy_lo_pct` y `bounds.copy_expectancy_hi_pct`).
 
 ### `status_rules`
 Cuándo una wallet es **ACTIVA** (score y muestra mínimos, actividad reciente),
 **OBSERVAR** (deterioro, avisos, inactividad) o **BLOQUEADA** (flag crítico).
 Solo las ACTIVAS pueden copiarse; una wallet en OBSERVAR no se copia aunque
-esté en whitelist.
+esté en whitelist. `min_copy_expectancy_pct` (0 % por defecto) pasa a
+OBSERVAR las wallets cuyo retorno **copiado** estimado por operación es menor,
+con muestra suficiente: su ventaja existe, pero tú no puedes capturarla.
 
 ### `detection`
 Umbrales de cada regla de comportamiento sospechoso (wash trading,
@@ -173,6 +197,11 @@ Edad máxima de la señal (`max_signal_age_seconds`), TTL de la señal,
 desviación máxima de precio frente al de la wallet origen, re-cotizar antes de
 ejecutar y edad máxima de la cotización. Si algo caduca, la operación se
 cancela y se explica.
+
+Con `per_wallet_max_age` el retraso máximo se adapta a cada wallet:
+`min(max_signal_age_seconds, max(min_signal_age_seconds, max_age_fraction_of_hold × holding mediano))`.
+Una wallet que mantiene 1 minuto exige señales de menos de 6 s; una que
+mantiene horas usa el límite global. La decisión indica el límite aplicado.
 
 ### `exits`
 - `default_mode`: `mirror` (sigue las salidas de la wallet; solo aplica el stop

@@ -12,6 +12,7 @@ import structlog
 from copytrader.analysis.metrics import WalletMetrics, compute_metrics, forward_win_rates
 from copytrader.analysis.reconstruction import Reconstruction, reconstruct
 from copytrader.analysis.regimes import RegimeClassifier
+from copytrader.analysis.replication import ReplicationParams
 from copytrader.analysis.stats import decay_weights
 from copytrader.config.models import AppConfig
 from copytrader.core.models import ClosedTrade, SwapEvent
@@ -64,6 +65,7 @@ class WalletAnalyzer:
         current_prices: dict[str, float],
         regimes: RegimeClassifier | None = None,
         price_at: PriceAt | None = None,
+        replication: ReplicationParams | None = None,
     ) -> WalletAnalysis:
         cfg = self._config()
         a, s = cfg.analysis, cfg.scoring
@@ -95,6 +97,8 @@ class WalletAnalyzer:
             "min_replicable_hold_seconds": a.min_replicable_hold_seconds,
             "peak_deployed_usd": recon.peak_deployed_usd,
             "outlier_multiple": cfg.detection.outlier_return_multiple,
+            "replication": replication if a.replication_enabled else None,
+            "token_liquidity": {mint: t.liquidity_usd for mint, t in tokens.items()},
         }
         m_all = compute_metrics(
             trades,

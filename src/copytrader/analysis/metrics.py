@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
 from copytrader.analysis import stats
 from copytrader.analysis.regimes import EXTREME_REGIMES
+from copytrader.analysis.replication import ReplicationParams, copy_stats, replicated_return
 from copytrader.core.models import ClosedTrade, OpenLot
 
 
@@ -78,6 +79,14 @@ class WalletMetrics:
     profitable_weeks_frac: float | None = None
     daily_pnl_std_usd: float | None = None
     replicable_frac: float | None = None
+    # Estimated result of COPYING the wallet (see analysis/replication.py)
+    copy_n: int = 0
+    copy_expectancy_pct: float | None = None
+    copy_expectancy_lb_pct: float | None = None
+    copy_win_rate: float | None = None
+    copy_profit_factor: float | None = None
+    copy_cost_pct: float | None = None
+    replication: dict[str, Any] = field(default_factory=dict)
     period_pnl: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     by_token: list[dict[str, Any]] = field(default_factory=list)
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -155,6 +164,8 @@ def compute_metrics(
     swap_times: Sequence[datetime] = (),
     outlier_multiple: float = 10.0,
     forward_win_rates: dict[str, float] | None = None,
+    replication: ReplicationParams | None = None,
+    token_liquidity: Mapping[str, float | None] | None = None,
 ) -> WalletMetrics:
     m = WalletMetrics(
         window=window,
@@ -262,6 +273,17 @@ def compute_metrics(
     m.max_consecutive_losses = stats.max_streak(win_flags, False)
     m.max_consecutive_wins = stats.max_streak(win_flags, True)
     m.replicable_frac = sum(1 for t in trades if t.holding_seconds >= min_replicable_hold_seconds) / n
+    if replication is not None:
+        liq = token_liquidity or {}
+        copied = [replicated_return(t, replication, liq.get(t.token_mint)) for t in trades]
+        cs = copy_stats(trades, copied, weights=w, z=z)
+        m.copy_n = cs.n
+        m.copy_expectancy_pct = cs.expectancy_pct
+        m.copy_expectancy_lb_pct = cs.expectancy_lb_pct
+        m.copy_win_rate = cs.win_rate
+        m.copy_profit_factor = cs.profit_factor
+        m.copy_cost_pct = cs.copy_cost_pct
+        m.replication = replication.describe()
 
     # --- consistency by period
     daily: dict[str, list[float]] = defaultdict(list)

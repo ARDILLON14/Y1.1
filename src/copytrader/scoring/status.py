@@ -40,6 +40,14 @@ def decide_status(
         observe.append(f"Inactiva desde hace {metrics.days_since_last_trade:.0f} días")
     if rules.observe_on_degradation:
         observe.extend(f"[{f.code}] {f.message}" for f in flags if f.code == "DEGRADATION")
+    floor = rules.min_copy_expectancy_pct
+    copied = metrics.copy_expectancy_pct
+    if floor is not None and copied is not None and metrics.copy_n >= rules.min_trades_active and copied < floor:
+        latency = metrics.replication.get("latency_seconds")
+        observe.append(
+            f"Ventaja no replicable: copiarla rendiría {copied:+.1f}% por operación "
+            f"(latencia ~{latency}s, tu tamaño y costes; mínimo {floor:+.1f}%)"
+        )
     if list_type is ListType.WATCHLIST:
         observe.append("En watchlist: solo alertas, sin copia automática")
     if observe:

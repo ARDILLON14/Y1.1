@@ -99,6 +99,13 @@ analysis:                             # [en caliente]
   regime_high_vol_threshold_pct: 6     # SOL ±6 % en 24 h = mercado extremo
   metrics_snapshot_hours: 24
   score_snapshot_minutes: 60
+  # Replicación: cuánto habrías ganado COPIANDO cada operación (llegas tarde, la compra de la
+  # wallet ya movió el precio, pagas tu impacto, slippage y comisiones). Alimenta el score
+  # (copy_edge) y la regla status_rules.min_copy_expectancy_pct.
+  replication_enabled: true
+  replication_latency_seconds: null    # null = mediana medida en tus copias recientes
+  replication_min_latency_samples: 20  # copias necesarias para usar la medida (si no, backtest.latency_seconds)
+  replication_size_usd: null           # null = el tamaño que daría el sizing por riesgo
 
 scoring:                              # [en caliente]
   weights:                             # pesos relativos (se normalizan)
@@ -114,6 +121,7 @@ scoring:                              # [en caliente]
     concentration: 0.06
     extreme_moves: 0.03
     replicability: 0.04
+    copy_edge: 0.18                    # ventaja estimada al copiarla con tu latencia, tamaño y costes
   sample:
     prior_trades: 30                   # k de la contracción n/(n+k): más alto = más escéptico
     prior_score: 40                    # hacia dónde se "contraen" las muestras pequeñas
@@ -137,6 +145,8 @@ status_rules:                         # [en caliente]  ACTIVA / OBSERVAR / BLOQU
   observe_on_degradation: true
   block_on_critical_flag: true
   block_below_score: null
+  min_copy_expectancy_pct: 0.0         # OBSERVAR si copiarla rinde menos de esto por operación
+                                       # (con muestra ≥ min_trades_active). null desactiva
 
 detection:                            # [en caliente]  umbrales de comportamiento sospechoso
   wash_fraction_warning: 0.25
@@ -235,6 +245,9 @@ latency:                              # [en caliente]  protección frente a late
   max_price_deviation_pct: 5.0
   requote_before_execution: true
   max_quote_age_seconds: 5
+  per_wallet_max_age: true             # el retraso máximo se adapta a cada wallet:
+  max_age_fraction_of_hold: 0.1        #   min(max_signal_age_seconds, 10 % de su holding mediano)
+  min_signal_age_seconds: 2            #   y nunca menos de esto
 
 exits:                                # [en caliente]  gestión de salida
   default_mode: protected              # mirror | protected | smart

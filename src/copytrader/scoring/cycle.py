@@ -12,12 +12,14 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import timedelta
+from statistics import median
 from typing import Any
 
 import structlog
 
 from copytrader.analysis.analyzer import PriceAt, TokenContext, WalletAnalysis, WalletAnalyzer
 from copytrader.analysis.regimes import RegimeClassifier
+from copytrader.analysis.replication import ReplicationParams, build_params
 from copytrader.config.models import AppConfig
 from copytrader.core.clock import Clock
 from copytrader.core.errors import CopyTraderError
@@ -26,7 +28,7 @@ from copytrader.core.models import Flag, SwapEvent
 from copytrader.core.types import ListType, Side, WalletStatus
 from copytrader.db.base import Database
 from copytrader.db.models import SelectionSnapshot, WalletScore
-from copytrader.db.repositories import AnalyticsRepo, TokenRepo, TransactionRepo, WalletRepo
+from copytrader.db.repositories import AnalyticsRepo, ExecutionRepo, TokenRepo, TransactionRepo, WalletRepo
 from copytrader.detection.detector import SuspicionDetector
 from copytrader.detection.rules import CoordinationIndex, DetectionContext
 from copytrader.observability import metrics as prom
@@ -59,6 +61,7 @@ class CycleReport:
     selected: list[str] = field(default_factory=list)
     status_counts: dict[str, int] = field(default_factory=dict)
     duration_seconds: float = 0.0
+    replication: dict[str, Any] = field(default_factory=dict)
 
 
 class EvaluationCycle:
@@ -105,6 +108,25 @@ class EvaluationCycle:
             extreme_threshold_pct=a.regime_high_vol_threshold_pct,
         )
 
+    async def replication_params(self) -> ReplicationParams:
+        """Copy-replication assumptions: YOUR latency (measured when possible), size and costs."""
+        cfg = self._config()
+        a = cfg.analysis
+        if a.replication_latency_seconds is not None:
+            latency, source = a.replication_latency_seconds, "config"
+        else:
+            async with self.db.session() as s:
+                samples = await ExecutionRepo(s).entry_latencies()
+            if len(samples) >= a.replication_min_latency_samples:
+                latency, source = median(samples), "measured"
+            else:
+                latency, source = cfg.backtest.latency_seconds, "default"
+        try:
+            sol_price = await self.tokens.sol_price()
+        except CopyTraderError:
+            sol_price = None
+        return build_params(cfg, latency_seconds=latency, sol_price_usd=sol_price, latency_source=source)
+
     async def run(self) -> CycleReport:
         async with self._lock:
             return await self._run()
@@ -135,6 +157,7 @@ class EvaluationCycle:
             for mint, t in token_rows.items()
         }
         regimes = await self._regimes(since, now)
+        replication = await self.replication_params() if cfg.analysis.replication_enabled else None
 
         analyses: dict[int, WalletAnalysis] = {}
         open_mints: set[str] = set()
@@ -148,6 +171,7 @@ class EvaluationCycle:
                 current_prices={},
                 regimes=regimes,
                 price_at=self.price_at,
+                replication=replication,
             )
             open_mints.update(lot.token_mint for lot in analyses[w.id].recon.open_lots if not lot.stale)
         prices: dict[str, float] = {}
@@ -168,6 +192,7 @@ class EvaluationCycle:
                         current_prices=prices,
                         regimes=regimes,
                         price_at=self.price_at,
+                        replication=replication,
                     )
 
         coordination = CoordinationIndex(
@@ -218,7 +243,11 @@ class EvaluationCycle:
             except Exception:
                 log.exception("selection_listener_failed")
 
-        report = CycleReport(evaluated=len(evaluations), selected=sorted(selection.addresses))
+        report = CycleReport(
+            evaluated=len(evaluations),
+            selected=sorted(selection.addresses),
+            replication=replication.describe() if replication else {},
+        )
         for e in evaluations:
             report.status_counts[e.status.status.value] = report.status_counts.get(e.status.status.value, 0) + 1
         for st in WalletStatus:

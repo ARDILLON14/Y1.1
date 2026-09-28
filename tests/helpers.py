@@ -56,6 +56,8 @@ def trade(
     wallet: str = "W",
     regime: str | None = None,
     category: str | None = None,
+    liquidity: float | None = None,
+    n_sells: int = 1,
 ) -> ClosedTrade:
     pnl = cost * ret
     return ClosedTrade(
@@ -69,10 +71,13 @@ def trade(
         return_frac=ret,
         holding_seconds=hold_minutes * 60,
         n_buys=1,
-        n_sells=1,
+        n_sells=n_sells,
         entry_price_usd=1.0,
         category=category,
         regime=regime,
+        liquidity_at_entry_usd=liquidity,
+        entry_value_usd=cost,
+        exit_price_usd=1.0 + ret,
     )
 
 

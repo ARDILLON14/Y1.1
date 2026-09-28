@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { lineChart, barChart, hbars } from "../charts.js";
-import { h, table, addr, walletStatus, severity, usd, frac, num, pct, dt, ago, short, toast, signClass, price } from "../dom.js";
+import { h, table, addr, walletStatus, severity, usd, frac, num, pct, dt, ago, short, toast, signClass, price, tile } from "../dom.js";
 
 export async function render(root, [address]) {
   const d = await api.get(`/wallets/${encodeURIComponent(address)}`);
@@ -11,6 +11,7 @@ export async function render(root, [address]) {
     h("p", {}, h("a", { href: "#/wallets" }, "← Wallets")),
     header(w, rerender),
     h("div", { class: "grid cols-2 section" }, scoreCard(d.score, w), historyCard(d.score_history)),
+    copyCard(all, d.signal_age_limit),
     flagsCard(d.flags),
     metricsCard(d.metrics),
     h("div", { class: "grid cols-2 section" }, dailyCard(all), breakdownCard(all)),
@@ -82,6 +83,34 @@ function scoreCard(score, w) {
       title: JSON.stringify(c.input) })), { max: 100, format: (v) => num(v, 0) }),
     score.penalties?.length ? h("div", { class: "section" }, h("h3", {}, "Penalizaciones"),
       h("ul", { class: "reasons" }, score.penalties.map((p) => h("li", {}, `−${num(p.points, 1)} · ${p.reason}`)))) : null);
+}
+
+const LATENCY_SOURCE = { measured: "medida en tus copias", config: "configurada", default: "por defecto, aún sin copias medidas", backtest: "backtest" };
+
+function copyCard(m, ageLimit) {
+  const r = m.replication || {};
+  const fmtHold = (min) => (min === null || min === undefined ? "—" : min < 2 ? `${num(min * 60, 0)} s` : min < 120 ? `${num(min, 0)} min` : `${num(min / 60, 1)} h`);
+  return h("div", { class: "card section" },
+    h("div", { class: "card-head" }, h("h2", {}, "Si la copias (estimación)"),
+      h("span", { class: "muted small" }, `${m.copy_n ?? 0} operaciones evaluadas`)),
+    m.copy_expectancy_pct === null || m.copy_expectancy_pct === undefined
+      ? h("div", { class: "empty" }, "Pendiente de análisis")
+      : h("div", {},
+        h("div", { class: "grid cols-4" },
+          tile("Retorno por operación copiado", h("span", { class: signClass(m.copy_expectancy_pct) }, pct(m.copy_expectancy_pct, 2, true)),
+            `el suyo: ${pct(m.expectancy_pct, 2, true)}`),
+          tile("Coste de copiarla", pct(m.copy_cost_pct, 2), "retraso, impacto, slippage y comisiones"),
+          tile("Win rate copiado", frac(m.copy_win_rate, 1), `el suyo: ${frac(m.win_rate, 1)}`),
+          tile("Profit factor copiado", num(m.copy_profit_factor, 2), `el suyo: ${num(m.profit_factor, 2)}`)),
+        h("dl", { class: "kv section" },
+          h("dt", {}, "Tu latencia"), h("dd", {}, `${num(r.latency_seconds, 1)} s (${LATENCY_SOURCE[r.latency_source] || r.latency_source || "—"})`),
+          h("dt", {}, "Tamaño supuesto"), h("dd", {}, usd(r.size_usd)),
+          h("dt", {}, "Comisiones fijas / slippage"), h("dd", {}, `${pct(r.fixed_cost_pct, 2)} ida y vuelta · ${pct(r.slippage_pct, 2)} por lado`),
+          h("dt", {}, "Holding mediano de la wallet"), h("dd", {}, fmtHold(m.median_holding_minutes)),
+          h("dt", {}, "Retraso máximo de sus señales"), h("dd", {}, ageLimit ? `${num(ageLimit.seconds, 1)} s (${ageLimit.reason})` : "—")),
+        h("p", { class: "muted small section" },
+          "Estima qué habrías ganado copiando cada operación cerrada: llegas tarde, la compra de la wallet ya movió el precio, pagas tu impacto, "
+          + "slippage y comisiones. Si sale negativo con muestra suficiente, la wallet pasa a OBSERVAR.")));
 }
 
 function historyCard(history) {

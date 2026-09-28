@@ -83,8 +83,15 @@ Coste: cada wallet necesita 1 llamada `getSignaturesForAddress` por cada
 un plan de pago, minutos. Las siguientes evaluaciones solo descargan lo nuevo.
 
 Resultado en *Wallets*: score, estado (ACTIVA/OBSERVAR/BLOQUEADA) con motivos,
-métricas y si está seleccionada. El detalle de cada wallet explica cada
-componente del score y cada aviso.
+métricas, si está seleccionada y **"Copia est./op"**: el retorno medio por
+operación que estimamos que obtendrías copiándola con tu latencia, tamaño y
+costes (su propio retorno aparece al pasar el ratón). El detalle de cada
+wallet explica cada componente del score, cada aviso y, en *Si la copias*,
+cuánto cuesta copiarla y el retraso máximo que se acepta para sus señales.
+
+Una wallet muy rentable puede quedar en OBSERVAR con el motivo "Ventaja no
+replicable": suele ser un scalper o alguien que compra mucho en pools pequeños.
+Su ventaja es real, pero no la puedes capturar llegando segundos tarde.
 
 ## 3. Alertas (nivel 2) y notificaciones
 
