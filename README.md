@@ -33,8 +33,14 @@ Aplicación privada, de uso personal, para **analizar wallets de Solana** y
   profit escalonado, trailing stop, tiempo máximo y stop de emergencia).
 - **Explica cada decisión** (qué comprobaciones pasaron, cuál la rechazó y por qué)
   y guarda una línea temporal por operación.
+- **Mide sus propias decisiones**: qué hizo el precio tras cada señal copiada o
+  rechazada, qué filtros protegen y cuáles cuestan oportunidades, resultado real
+  frente al estimado por wallet, y dónde se va el dinero (comisiones, retraso).
+- Puntúa las wallets por lo que **tú** puedes capturar copiándolas (con tu
+  latencia, tamaño y costes), no solo por lo que ganan ellas.
 - **Dashboard web** privado, notificaciones por **Telegram/Discord**, métricas
-  Prometheus/Grafana y **backtesting** walk-forward con separación train/test.
+  Prometheus/Grafana y **backtesting** walk-forward con separación train/test y
+  comparación de configuraciones.
 
 ## Prueba rápida (sin claves, mercado simulado)
 

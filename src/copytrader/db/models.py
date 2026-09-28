@@ -405,3 +405,29 @@ class BacktestRun(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     results: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class SignalOutcome(Base):
+    """What the token did after a COPY decision — for executed AND rejected signals.
+
+    Comparing the forward returns of rejected signals (grouped by the check that
+    rejected them) with those of executed ones shows which filters protect the
+    capital and which ones only cost opportunities.
+    """
+
+    __tablename__ = "signal_outcomes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id", ondelete="CASCADE"), unique=True)
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id", ondelete="CASCADE"), index=True)
+    token_mint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    mode: Mapped[str | None] = mapped_column(String(8))
+    failed_check: Mapped[str | None] = mapped_column(String(40), index=True)
+    failed_label: Mapped[str | None] = mapped_column(String(120))
+    reference_price_usd: Mapped[float] = mapped_column(Float)
+    reference_at: Mapped[datetime] = mapped_column(index=True)
+    # {"5": 0.12, "60": -0.03, "1440": null}: return vs reference per horizon (minutes); null = missed
+    returns: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -10,6 +10,7 @@ const VIEWS = {
   positions: () => import("./views/positions.js"),
   alerts: () => import("./views/alerts.js"),
   risk: () => import("./views/risk.js"),
+  analytics: () => import("./views/analytics.js"),
   backtest: () => import("./views/backtest.js"),
   config: () => import("./views/config.js"),
   system: () => import("./views/system.js"),

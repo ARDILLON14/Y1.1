@@ -143,6 +143,7 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | Las cotizaciones y swaps de órdenes compartían el límite de 1 petición/s de Jupiter con la consulta de precios y podían esperar detrás de ella | Rate limit con prioridades: ejecución antes que precios en segundo plano |
 | Las wallets se puntuaban por su PnL a sus propios precios, no por lo que puede capturar quien las copia | **PnL replicado** por wallet (latencia medida, impacto de su compra y la tuya, deriva durante el retraso, slippage, comisiones): componente `copy_edge` del score y regla que pasa a OBSERVAR las wallets no replicables |
 | Un único retraso máximo de señal (20 s) para scalpers y wallets de horas | Retraso máximo por wallet según su holding mediano |
+| No se medía qué pasaba con lo rechazado ni de dónde venía el resultado | **Medición**: seguimiento del precio tras cada decisión (también las rechazadas) y página *Análisis* con la lectura de cada filtro, resultado real vs estimado por wallet, por salida, por retraso y costes; **comparación de configuraciones** en el backtest |
 
 Efecto medido en el mercado simulado (walk-forward, mismos datos): con los
 costes reales, la selección anterior elegía también scalpers y una wallet
@@ -154,9 +155,10 @@ confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
 
 **Pendiente, por impacto esperado**
 
-1. **Medición**: seguimiento de las señales rechazadas/caducadas (qué habría
-   pasado), atribución del resultado (por wallet, salida, retraso, comisiones)
-   y varias configuraciones en paper en paralelo.
+1. **Varias configuraciones en paper en paralelo** sobre las señales reales
+   (hoy la comparación de configuraciones se hace en el backtest, y el efecto
+   de los filtros se mide con el seguimiento de señales rechazadas). Requiere
+   separar libros de paper por variante en posiciones, riesgo y salidas.
 2. **Aprendizaje propio**: comparar el resultado de copiar a cada wallet con el
    suyo y degradar las que no se pueden replicar; periodo de prueba en paper
    para wallets nuevas.

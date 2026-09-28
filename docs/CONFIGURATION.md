@@ -32,7 +32,7 @@ copytrader check-config
 
 | En caliente (dashboard) | Solo editando el YAML y reiniciando |
 |---|---|
-| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
+| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest`, `measurement` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
 
 Claves **bloqueadas** aunque su sección sea editable (requieren YAML + reinicio,
 a propósito, porque controlan el dinero real):
@@ -254,6 +254,13 @@ URL del firmador, ruta del keystore (solo `local`) y tolerancia de reloj HMAC.
 Ventanas de entrenamiento y test, latencia, slippage, comisiones y coeficiente
 de impacto de mercado usados en la simulación. `fee_usd_per_trade: null` usa el
 mismo modelo de costes de red que el paper trading.
+
+### `measurement`
+Seguimiento de lo que hizo el precio después de cada decisión de copia,
+ejecutada o rechazada, a los horizontes de `outcome_horizons_minutes` (5 min,
+1 h y 24 h por defecto). Si una medida llega demasiado tarde (por ejemplo, la
+app estuvo parada) se registra como "no medida" en lugar de con un precio que
+no corresponde. Alimenta la página *Análisis*.
 
 ## 6. Costes de red
 

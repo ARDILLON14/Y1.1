@@ -149,3 +149,22 @@ async def test_logout_invalidates_session(client):
     csrf = await _login(cl)
     assert (await cl.post("/api/auth/logout", headers={"X-CSRF-Token": csrf})).status_code == 200
     assert (await cl.get("/api/overview")).status_code == 401
+
+
+async def test_backtest_variants_are_validated_before_starting(client):
+    cl, _ = client
+    csrf = await _login(cl)
+    bad = {"variants": [{"name": "x", "patch": {"security": {"signer_mode": "local"}}}]}
+    r = await cl.post("/api/backtest", json=bad, headers={"X-CSRF-Token": csrf})
+    assert r.status_code == 400
+    assert (await cl.get("/api/backtest")).json() == []  # nothing was started
+
+
+async def test_analytics_endpoint(client):
+    cl, _ = client
+    await _login(cl)
+    r = await cl.get("/api/analytics?mode=paper&days=7")
+    assert r.status_code == 200
+    body = r.json()
+    assert {"filters", "wallets", "exits", "delay", "costs", "horizons"} <= set(body)
+    assert (await cl.get("/api/analytics?mode=futures")).status_code == 422

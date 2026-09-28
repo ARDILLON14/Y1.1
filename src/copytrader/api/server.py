@@ -73,8 +73,8 @@ class RateLimit(BaseHTTPMiddleware):
 
 
 def create_app(container: Any, application: Any = None) -> FastAPI:
+    from copytrader.api.routes import analytics, dashboard, trading, wallets
     from copytrader.api.routes import auth as auth_routes
-    from copytrader.api.routes import dashboard, trading, wallets
 
     cfg = container.cfg
     key = container.secrets.data_encryption_key
@@ -115,6 +115,7 @@ def create_app(container: Any, application: Any = None) -> FastAPI:
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(wallets.router, prefix="/api")
     app.include_router(trading.router, prefix="/api")
+    app.include_router(analytics.router, prefix="/api")
 
     if WEB_DIR.exists():
         app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

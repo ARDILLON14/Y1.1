@@ -78,6 +78,7 @@ class Application:
         self._spawn(c.recovery.run(), "recovery")
         if c.token_accounts is not None:
             self._spawn(c.token_accounts.run(), "token_accounts")
+        self._spawn(c.outcomes.run(), "outcomes")
         self._spawn(self._health_loop(), "health")
         self._spawn(self._housekeeping_loop(), "housekeeping")
         if self.serve_api and cfg.api.enabled:
@@ -195,6 +196,7 @@ class Application:
         await c.recovery.stop()
         if c.token_accounts is not None:
             await c.token_accounts.stop()
+        await c.outcomes.stop()
         if self._api_server is not None:
             self._api_server.should_exit = True
         await c.signals.stop()

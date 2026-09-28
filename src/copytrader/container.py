@@ -32,6 +32,7 @@ from copytrader.execution.paper import PaperExecutor
 from copytrader.execution.recovery import OrderRecovery
 from copytrader.execution.service import ExecutionGuard, ExecutionService
 from copytrader.execution.token_accounts import TokenAccountJanitor
+from copytrader.measurement.outcomes import OutcomeTracker
 from copytrader.notifications.channels import Channel, DiscordChannel, NotificationService, TelegramChannel
 from copytrader.observability import metrics
 from copytrader.observability.health import HealthRegistry
@@ -166,6 +167,7 @@ class Container:
             tokens=self.tokens,
             kill=self.kill,
         )
+        self.outcomes = OutcomeTracker(db=self.db, clock=self.clock, config=self.get_cfg, tokens=self.tokens)
         self.token_accounts: TokenAccountJanitor | None = None
         if self.providers.live_executor is not None and self.providers.rpc is not None:
             self.token_accounts = TokenAccountJanitor(

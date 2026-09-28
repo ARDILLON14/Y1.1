@@ -347,3 +347,9 @@ backtest:                             # [en caliente]
   exit_slippage_pct: 2
   fee_usd_per_trade: null              # null = mismo modelo de costes que el paper trading
   impact_coefficient: 1.0
+
+measurement:                          # [en caliente]  medición de decisiones (página Análisis)
+  track_outcomes: true                 # seguir el precio tras cada decisión de copia, ejecutada o rechazada
+  outcome_horizons_minutes: [5, 60, 1440]
+  outcome_interval_seconds: 60
+  max_sample_lateness_fraction: 0.25   # si se mide demasiado tarde (app parada), se marca como no medido

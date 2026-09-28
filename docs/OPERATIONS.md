@@ -146,6 +146,31 @@ mide en el de test, que no ha visto. Se compara con dos referencias (copiar a
 todas, y elegir por PnL bruto). Si la estrategia no bate a las referencias
 fuera de muestra, no subas de nivel.
 
+**Comparar configuraciones**: en *Backtest → Comparar configuraciones* añade
+hasta 2 variantes como cambios en JSON (las mismas secciones y límites que la
+página *Configuración*), por ejemplo `{"risk": {"max_slippage_pct": 5}}` o
+`{"exits": {"default_mode": "smart"}}`. Se ejecutan sobre los mismos datos y
+ventanas que la configuración actual y se muestran lado a lado. Aplica un
+cambio solo si mejora de forma clara y con suficientes operaciones; una
+diferencia pequeña suele ser ruido.
+
+### Análisis de resultados
+
+La página *Análisis* responde, con tus propios datos, a:
+
+- **¿Protegen los filtros?** Para cada motivo de rechazo, qué hizo el precio
+  del token a 5 min, 1 h y 24 h, frente a las señales ejecutadas. Si lo que un
+  filtro rechaza sube más que lo que se ejecuta ("Revisar"), ese filtro puede
+  estar costándote oportunidades; si baja ("Protege"), está haciendo su
+  trabajo. Con menos de 10 medidas se indica "Muestra insuficiente".
+- **Resultado por wallet**: lo que has ganado realmente copiando cada wallet
+  frente a lo que estimaba el modelo de copia y a lo que gana ella.
+- **Por motivo de salida** (stop loss, take profit, venta del origen…) y **por
+  retraso de entrada**.
+- **Costes**: resultado bruto, comisiones y neto, y el coste de entrar
+  desglosado en "llegar tarde" (precio de la señal → cotización) y "ejecución"
+  (cotización → precio conseguido).
+
 ## 5. Conectar la wallet de ejecución
 
 Usa una **wallet exclusiva para el bot** con **solo el capital necesario**
@@ -270,5 +295,8 @@ o activar un kill switch.
 - Motivos de rechazo más frecuentes (*Señales* filtrando por rechazadas): si
   casi todo caduca por latencia, necesitas un RPC/stream más rápido, no
   relajar límites.
+- *Análisis*: filtros marcados "Revisar" con muestra suficiente, wallets cuyo
+  resultado real queda muy por debajo del estimado, y qué parte del resultado
+  se va en comisiones.
 - Slippage real frente al configurado.
 - Que el resultado no dependa de 1-2 operaciones.

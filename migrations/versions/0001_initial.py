@@ -18,11 +18,17 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+# Tables added by later revisions: the baseline must not create them, or those
+# revisions would fail on a fresh database.
+LATER_TABLES = frozenset({"signal_outcomes"})
+
+
 def upgrade() -> None:
     from copytrader.db import models  # noqa: F401
     from copytrader.db.base import Base
 
-    Base.metadata.create_all(op.get_bind())
+    tables = [t for name, t in Base.metadata.tables.items() if name not in LATER_TABLES]
+    Base.metadata.create_all(op.get_bind(), tables=tables)
 
 
 def downgrade() -> None:

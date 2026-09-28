@@ -504,6 +504,23 @@ class SecuritySection(Section):
     hmac_max_skew_seconds: float = Field(30.0, gt=0, le=300)
 
 
+class MeasurementSection(Section):
+    # Follow what the token did after every COPY decision, executed or rejected.
+    track_outcomes: bool = True
+    outcome_horizons_minutes: list[float] = Field(default_factory=lambda: [5.0, 60.0, 1440.0])
+    outcome_interval_seconds: float = Field(60.0, ge=10)
+    # A horizon sampled later than max(2 × interval, fraction × horizon) after it was due is
+    # recorded as missed instead of with a misleading price (e.g. the app was down).
+    max_sample_lateness_fraction: float = Field(0.25, gt=0, le=5)
+
+    @field_validator("outcome_horizons_minutes")
+    @classmethod
+    def _horizons(cls, v: list[float]) -> list[float]:
+        if not v or any(h <= 0 for h in v):
+            raise ValueError("outcome_horizons_minutes must be positive")
+        return sorted(set(v))
+
+
 class BacktestSection(Section):
     train_days: int = Field(30, ge=1)
     test_days: int = Field(7, ge=1)
@@ -538,6 +555,7 @@ class AppConfig(Section):
     observability: ObservabilitySection = ObservabilitySection()
     security: SecuritySection = SecuritySection()
     backtest: BacktestSection = BacktestSection()
+    measurement: MeasurementSection = MeasurementSection()
 
     @model_validator(mode="after")
     def _cross_section(self) -> AppConfig:

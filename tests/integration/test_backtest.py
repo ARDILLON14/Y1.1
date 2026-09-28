@@ -46,3 +46,34 @@ def test_no_look_ahead_in_selection():
     params = BacktestParams(train_days=10, test_days=5)
     result = bt.run(swaps, params)
     assert "results" in result
+
+
+async def test_backtest_compares_configuration_variants_on_the_same_data(container):
+    import pytest
+
+    from copytrader.backtest.service import validate_variants
+    from copytrader.core.errors import ConfigError
+
+    variants = [
+        {"name": "Solo top 3", "patch": {"selection": {"top_n": 3}}},
+        {"name": "Salida inteligente", "patch": {"exits": {"default_mode": "smart"}}},
+    ]
+    run_id = await run_backtest(container, {"train_days": 20, "test_days": 7}, variants)
+    async with container.db.session() as s:
+        run = await BacktestRepo(s).get(run_id)
+    assert run.status == "done", run.error
+    compared = run.results["variants"]
+    assert [v["name"] for v in compared] == ["Configuración actual", "Solo top 3", "Salida inteligente"]
+    assert compared[0]["summary"] == {
+        k: v for k, v in run.results["results"]["strategy"].items() if k != "equity_curve"
+    }
+    for v in compared:
+        assert "roi_pct" in v["summary"] and v["equity_curve"]
+    assert run.params["variants"][0]["patch"] == {"selection": {"top_n": 3}}
+
+    with pytest.raises(ConfigError):  # same scope rules as a live change: no touching the operating level
+        validate_variants(container, [{"name": "x", "patch": {"app": {"operating_level": 5}}}])
+    with pytest.raises(ConfigError):  # hard limits still apply
+        validate_variants(container, [{"name": "x", "patch": {"risk": {"max_trade_usd": 10**6}}}])
+    with pytest.raises(ConfigError):
+        validate_variants(container, [{"name": str(i), "patch": {"selection": {"top_n": i + 1}}} for i in range(3)])

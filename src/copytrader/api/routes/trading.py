@@ -144,6 +144,11 @@ async def close_position(
     return {"success": result.success, "error": result.error, "value_usd": result.value_usd}
 
 
+class BacktestVariant(BaseModel):
+    name: str = Field("", max_length=40)
+    patch: dict[str, Any]
+
+
 class BacktestBody(BaseModel):
     train_days: int | None = Field(None, ge=1, le=365)
     test_days: int | None = Field(None, ge=1, le=90)
@@ -152,18 +157,23 @@ class BacktestBody(BaseModel):
     entry_slippage_pct: float | None = Field(None, ge=0, le=50)
     exit_slippage_pct: float | None = Field(None, ge=0, le=50)
     exit_mode: Literal["mirror", "protected", "smart"] | None = None
+    # Alternative configurations run on the same data: [{"name": ..., "patch": {...}}]
+    variants: list[BacktestVariant] | None = Field(None, max_length=2)
 
 
 @router.post("/backtest")
 async def start_backtest(
     body: BacktestBody, request: Request, sess: Session = Depends(write_session)
 ) -> dict[str, Any]:
-    from copytrader.backtest.service import run_backtest
+    from copytrader.backtest.service import run_backtest, validate_variants
 
     c = ctx(request).container
     if any(not t.done() for t in _backtests):
         raise HTTPException(status_code=409, detail="ya hay un backtest en curso")
-    task = asyncio.get_running_loop().create_task(run_backtest(c, body.model_dump(exclude_none=True)))
+    variants = [v.model_dump() for v in body.variants or []]
+    validate_variants(c, variants)  # invalid patches fail here (400), not inside the background task
+    overrides = body.model_dump(exclude_none=True, exclude={"variants"})
+    task = asyncio.get_running_loop().create_task(run_backtest(c, overrides, variants))
     _backtests.add(task)
     task.add_done_callback(_backtests.discard)
     async with c.db.session() as s:

@@ -22,10 +22,23 @@ export async function render(root) {
     entry_slippage_pct: h("input", { type: "number", min: "0", step: "0.1", placeholder: "2" }),
     exit_mode: h("select", {}, h("option", { value: "" }, "Config"), h("option", { value: "mirror" }, "Espejo"), h("option", { value: "protected" }, "Protegido"), h("option", { value: "smart" }, "Inteligente")),
   };
+  const variants = [1, 2].map((i) => ({
+    name: h("input", { type: "text", maxlength: "40", placeholder: `Variante ${i}` }),
+    patch: h("textarea", { class: "mono small", rows: "3", placeholder: i === 1
+      ? '{"risk": {"max_slippage_pct": 5}}'
+      : '{"exits": {"default_mode": "smart"}, "selection": {"top_n": 5}}' }),
+  }));
   const start = async (e) => {
     e.preventDefault();
     const body = {};
     for (const [k, el] of Object.entries(f)) if (el.value !== "") body[k] = el.tagName === "SELECT" ? el.value : Number(el.value);
+    const vs = [];
+    for (const [i, v] of variants.entries()) {
+      if (!v.patch.value.trim()) continue;
+      try { vs.push({ name: v.name.value || `Variante ${i + 1}`, patch: JSON.parse(v.patch.value) }); }
+      catch { toast(`JSON inválido en la variante ${i + 1}`, true); return; }
+    }
+    if (vs.length) body.variants = vs;
     try { await api.post("/backtest", body); toast("Backtest iniciado"); render(root); } catch (ex) { toast(ex.message, true); }
   };
   const detail = h("div");
@@ -37,6 +50,13 @@ export async function render(root) {
         h("label", { class: "field" }, "Días de entrenamiento", f.train_days), h("label", { class: "field" }, "Días de evaluación", f.test_days),
         h("label", { class: "field" }, "Top N", f.top_n), h("label", { class: "field" }, "Latencia (s)", f.latency_seconds),
         h("label", { class: "field" }, "Slippage entrada %", f.entry_slippage_pct), h("label", { class: "field" }, "Modo de salida", f.exit_mode)),
+      h("details", { class: "section" },
+        h("summary", {}, "Comparar configuraciones (opcional)"),
+        h("p", { class: "muted small" }, "Hasta 2 variantes: cambios de configuración en JSON, con las mismas secciones y límites que la página "
+          + "Configuración. Cada una se ejecuta sobre los mismos datos que la configuración actual."),
+        h("div", { class: "form-grid" }, variants.flatMap((v, i) => [
+          h("label", { class: "field" }, `Nombre ${i + 1}`, v.name),
+          h("label", { class: "field" }, `Cambios ${i + 1} (JSON)`, v.patch)]))),
       h("div", { class: "row section" }, h("span", { class: "spacer" }), h("button", { class: "primary", type: "submit" }, "Ejecutar backtest"))),
     h("div", { class: "card section" }, h("h2", {}, "Ejecuciones"), table([
       { label: "#", num: true, render: (r) => r.id },
@@ -60,7 +80,22 @@ async function showRun(el, id) {
   if (!run.results?.results) { el.replaceChildren(); return; }
   const res = run.results.results;
   const chart = h("div");
-  el.replaceChildren(h("div", { class: "card section" },
+  const variants = run.results.variants || [];
+  const vchart = h("div");
+  el.replaceChildren(variants.length ? h("div", { class: "card section" },
+    h("h2", {}, "Comparación de configuraciones"),
+    h("p", { class: "muted small" }, "Misma historia, mismas ventanas; solo cambia la configuración. Una diferencia pequeña o en pocas "
+      + "operaciones no es concluyente: confírmala con más periodo antes de aplicarla."),
+    table([
+      { label: "Configuración", render: (v) => v.name },
+      { label: "Cambios", wrap: true, render: (v) => h("span", { class: "mono small" }, Object.keys(v.patch).length ? JSON.stringify(v.patch) : "—") },
+      { label: "ROI", num: true, render: (v) => pct(v.summary.roi_pct, 2, true) },
+      { label: "Drawdown máx.", num: true, render: (v) => pct(v.summary.max_drawdown_pct, 2) },
+      { label: "Operaciones", num: true, render: (v) => v.summary.n_trades ?? "—" },
+      { label: "Win rate", num: true, render: (v) => frac(v.summary.win_rate, 1) },
+      { label: "Profit factor", num: true, render: (v) => num(v.summary.profit_factor, 2) },
+      { label: "Comisiones", num: true, render: (v) => usd(v.summary.fees_usd) },
+    ], variants), vchart) : "", h("div", { class: "card section" },
     h("h2", {}, `Backtest #${id} · ${run.results.period.start.slice(0, 10)} → ${run.results.period.end.slice(0, 10)}`),
     table([
       { label: "Estrategia", render: (r) => NAMES[r.k] },
@@ -80,6 +115,11 @@ async function showRun(el, id) {
       { label: "Operaciones", num: true, render: (w) => w.trades },
     ], run.results.windows),
     h("ul", { class: "reasons section small" }, run.results.notes.map((n) => h("li", {}, n)))));
+  if (variants.length) {
+    lineChart(vchart, variants.map((v, i) => ({
+      name: v.name, color: `var(--series-${i + 1})`, points: (v.equity_curve || []).map((p) => ({ x: new Date(p.ts), y: p.equity })),
+    })), { area: false, yFormat: axisUsd });
+  }
   lineChart(chart, Object.entries(res).map(([k, v]) => ({
     name: NAMES[k], color: COLORS[k], points: v.equity_curve.map((p) => ({ x: new Date(p.ts), y: p.equity })),
   })), { area: false, yFormat: axisUsd });
