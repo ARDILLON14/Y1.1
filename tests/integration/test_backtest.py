@@ -40,7 +40,7 @@ def test_no_look_ahead_in_selection():
         swaps["late"].append(swap("late", f"L{i}", Side.BUY, t2, 100, 100))
         swaps["late"].append(swap("late", f"L{i}", Side.SELL, t2 + timedelta(hours=1), 100, 150))
     bt = Backtester(lambda: cfg)
-    selected, scores, _ = bt._select(swaps, {}, T0 + timedelta(days=15), 30, {}, set(), 5)
+    selected, scores, _, _ = bt._select(swaps, {}, T0 + timedelta(days=15), 30, {}, set(), 5)
     assert "late" not in selected
     assert scores["late"] < 50  # no data before t → neutral/low prior only
     params = BacktestParams(train_days=10, test_days=5)
@@ -77,3 +77,54 @@ async def test_backtest_compares_configuration_variants_on_the_same_data(contain
         validate_variants(container, [{"name": "x", "patch": {"risk": {"max_trade_usd": 10**6}}}])
     with pytest.raises(ConfigError):
         validate_variants(container, [{"name": str(i), "patch": {"selection": {"top_n": i + 1}}} for i in range(3)])
+
+
+def test_backtest_simulates_the_protective_exits():
+    from copytrader.backtest.engine import WalletFacts, _Pos
+    from copytrader.config.loader import build_config
+
+    cfg = build_config({"exits": {"wallet_sells_exit_min": 2, "wallet_sells_exit_fraction": 0.5}})
+    bt = Backtester(lambda: cfg)
+    params = BacktestParams()
+    pos = _Pos("M", "src", qty=10, cost=100, entry_price=10, peak=10, opened_at=T0, at_risk=20)
+    closed: list[tuple[str, float]] = []
+
+    def close(p, fraction, price, when, reason):
+        closed.append((reason, fraction))
+
+    facts = {w: WalletFacts(None, None, w != "blocked") for w in ("a", "b", "blocked")}
+
+    def sell(wallet: str, minutes: float, before: float, after: float):
+        ev = swap(wallet, "M", Side.SELL, T0 + timedelta(minutes=minutes), 1, 10, before=before, after=after)
+        bt._wallet_sell(pos, ev, ev.block_time, 10.0, params, facts, close)
+
+    sell("a", 5, 100, 10)
+    sell("blocked", 6, 100, 0)  # not credible: does not count
+    sell("b", 7, 100, 80)  # 20 %: not an exit yet
+    assert not closed
+    sell("b", 8, 80, 40)  # 60 % of its holding in the window: two credible wallets out
+    assert closed == [("wallets_selling", 0.5)]
+    sell("a", 9, 10, 0)
+    assert len(closed) == 1  # once per position
+    # a sell outside the window (60 min) no longer counts
+    late = _Pos("M", "src", qty=10, cost=100, entry_price=10, peak=10, opened_at=T0, at_risk=20)
+    closed.clear()
+    pos = late
+    sell("a", 5, 100, 0)
+    sell("b", 120, 100, 0)
+    assert not closed
+
+
+def test_wallet_sells_exit_is_off_by_default():
+    from copytrader.backtest.engine import WalletFacts, _Pos
+    from copytrader.config.loader import build_config
+
+    cfg = build_config({})
+    bt = Backtester(lambda: cfg)
+    pos = _Pos("M", "src", qty=10, cost=100, entry_price=10, peak=10, opened_at=T0, at_risk=20)
+    closed: list[str] = []
+    facts = {w: WalletFacts(None, None, True) for w in ("a", "b")}
+    for i, w in enumerate(("a", "b")):
+        ev = swap(w, "M", Side.SELL, T0 + timedelta(minutes=i + 1), 1, 10, before=100, after=0)
+        bt._wallet_sell(pos, ev, ev.block_time, 10.0, BacktestParams(), facts, lambda *a: closed.append(a[-1]))
+    assert not closed

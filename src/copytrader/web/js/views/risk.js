@@ -61,6 +61,13 @@ export async function render(root) {
           h("dt", {}, "Take profit"), h("dd", {}, r.exits.take_profit_levels.map((t) => `+${t.gain_pct}% → ${Math.round(t.sell_fraction * 100)}%`).join(" · ")),
           h("dt", {}, "Trailing stop"), h("dd", {}, r.exits.trailing_stop_pct ? `${r.exits.trailing_stop_pct}% (activa en +${r.exits.trailing_activation_pct}%)` : "No"),
           h("dt", {}, "Permanencia máxima"), h("dd", {}, r.exits.max_hold_minutes ? `${num(r.exits.max_hold_minutes, 0)} min` : "Sin límite"),
+          h("dt", {}, "Stop según volatilidad"), h("dd", {}, r.exits.volatility_stop
+            ? `Sí: ${r.exits.volatility_stop_sigmas}× el movimiento esperado, entre ${pct(r.exits.volatility_stop_min_pct, 0)} y ${pct(r.exits.volatility_stop_max_pct, 0)}` : "No"),
+          h("dt", {}, "Perfil de la wallet"), h("dd", {}, r.exits.wallet_exit_profile
+            ? `Sí: tiempo máx ${r.exits.profile_hold_multiple}× su holding mediano${r.exits.profile_take_profit ? ", TP según su ganancia mediana" : ""}` : "No"),
+          h("dt", {}, "Salida por caída de liquidez"), h("dd", {}, r.exits.liquidity_drop_exit_pct ? `−${r.exits.liquidity_drop_exit_pct}% desde la entrada` : "No"),
+          h("dt", {}, "Salida si venden varias wallets"), h("dd", {}, r.exits.wallet_sells_exit_min
+            ? `${r.exits.wallet_sells_exit_min} wallets fiables venden ≥${Math.round(r.exits.wallet_sells_min_fraction * 100)}% → vender ${Math.round(r.exits.wallet_sells_exit_fraction * 100)}%` : "No"),
           h("dt", {}, "Retraso máximo de copia"), h("dd", {}, `${r.latency.max_signal_age_seconds} s`),
           h("dt", {}, "Desviación máxima de precio"), h("dd", {}, pct(r.latency.max_price_deviation_pct, 1)),
           h("dt", {}, "TTL de señal"), h("dd", {}, `${r.latency.signal_ttl_seconds} s`))),

@@ -152,6 +152,8 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | La misma priority fee máxima para una entrada de 10 USD que para una salida por stop loss; el modelo de costes asumía siempre el tope | **Comisiones dinámicas**: nivel por urgencia (las salidas de protección y los reintentos pagan el máximo), tope en % del tamaño para lo demás, propina de Jito según el mercado, y el modelo de costes usa la mediana de lo que pagan de verdad tus operaciones |
 | Cada transacción salía solo por el RPC principal | **Envío por varias rutas** a la vez (RPC, RPC extra, block engine de Jito) y modo solo-Jito *bundle-only* contra sándwiches |
 | La cotización de la venta (ruta de salida) esperaba a la de la compra y se repetía para cada señal del mismo token; los datos de mercado del token esperaban a los de RugCheck/mint | Cotización de venta en paralelo con la compra, caché de 5 min por token y datos del token pedidos a la vez a sus tres fuentes |
+| Una posición cuyo pool perdía la liquidez (rug, LP retirado) solo se cerraba cuando el precio caía hasta el stop | **Salida por caída de liquidez** (−50 % desde la entrada, confirmada dos veces), urgente y activa en todos los modos |
+| Mismos stop, tiempo máximo y take profit para cualquier token y wallet | **Perfil de salida adaptativo** (stop según volatilidad con el tamaño ajustado para arriesgar lo mismo; tiempo y TP según la wallet) y **salida cuando venden varias wallets fiables**: implementados y medidos, pero desactivados por defecto (ver abajo) |
 
 Efecto medido en el mercado simulado (walk-forward, mismos datos): con los
 costes reales, la selección anterior elegía también scalpers y una wallet
@@ -160,6 +162,23 @@ selecciona solo las wallets con ventaja copiable y **gana un 19,2 %** con un
 drawdown máximo del 2,8 % (profit factor 1,83), por encima de las referencias
 "copiar todo" (−36 %) y "elegir por PnL" (+15,6 %). Es un mercado sintético:
 confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
+
+Salidas medidas en el mismo backtest walk-forward (tres universos simulados;
+rentabilidad de la estrategia con y sin cada salida):
+
+| Salida | Modo protegido (por defecto) | Modo inteligente |
+|---|---|---|
+| Stop según volatilidad | +23,0 → +14,4 % · +25,9 → +20,8 % · +26,2 → +8,7 % | +57,3 → +40,6 % · +40,3 → +34,4 % · +27,5 → +8,7 % |
+| Perfil de tiempo de la wallet | sin cambio | +57,3 → +35,5 % · +40,3 → +41,3 % · +27,5 → +34,3 % |
+| Ventas de varias wallets | +23,0 → +23,1 % · +25,9 → +25,9 % · +26,2 → +25,3 % | +57,3 → +53,4 % · +40,3 → +41,8 % · +27,5 → +19,5 % |
+| Caída de liquidez | sin cambio (ningún rug entre los tokens copiados) | sin cambio (1 salida) |
+
+Por eso solo la salida por liquidez viene activada: es un seguro que no costó
+nada. Las otras quedan disponibles para probarlas con una variante del
+backtest y en paper. El mercado simulado no reproduce, por ejemplo, que las
+buenas wallets salgan juntas de un token por una razón real, así que no
+demuestra que esas salidas no sirvan en el mercado real; solo que activarlas
+sin medir no está justificado.
 
 **Pendiente, por impacto esperado**
 
@@ -171,10 +190,11 @@ confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
    fiable: presión compradora reciente, concentración de holders calculada
    directamente (no solo el aviso de RugCheck) y simulación completa de la
    venta en cadena.
-3. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
-   por caída de liquidez o por ventas de varias wallets seguidas.
-4. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
-   evaluar stop loss ni take profit entre operaciones).
+3. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
+   evaluar stop loss ni take profit entre operaciones, ni las salidas
+   adaptativas: se calculan sobre la serie de precios).
+4. **Medir en la sombra** las salidas desactivadas (qué habría pasado si
+   hubieran saltado), como ya se hace con las señales rechazadas.
 5. **Ejecución, siguiente paso**: stream gRPC (Yellowstone / LaserStream), que
    necesita un proveedor de pago y otra dependencia; confirmación por
    suscripción en lugar de consultar el estado cada 0,4 s.

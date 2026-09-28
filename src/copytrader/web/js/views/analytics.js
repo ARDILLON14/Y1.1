@@ -16,6 +16,8 @@ const TRIGGERS = {
   max_hold: "Tiempo máximo",
   manual: "Cierre manual",
   kill_switch: "Kill switch",
+  liquidity_drop: "Caída de liquidez",
+  wallets_selling: "Venden varias wallets",
 };
 
 // Total entry cost vs the source's price: arriving late (signal → quote) compounded with execution (quote → fill).

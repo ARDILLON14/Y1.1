@@ -41,7 +41,6 @@ from copytrader.core.types import (
     Side,
     SignalStatus,
     TradeMode,
-    WalletStatus,
 )
 from copytrader.db.base import Database
 from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo
@@ -51,9 +50,17 @@ from copytrader.execution.fees import FeePolicy
 from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
+from copytrader.positions.adaptive import ExitProfile, build_exit_profile
 from copytrader.resilience.rate_limiter import Priority
 from copytrader.risk.engine import EntryRequest, RiskEngine
-from copytrader.signals.engine import SignalContext, SignalEngine, WalletInfo, copyable, signal_age_limit
+from copytrader.signals.engine import (
+    SignalContext,
+    SignalEngine,
+    WalletInfo,
+    copyable,
+    credible,
+    signal_age_limit,
+)
 
 log = structlog.get_logger(__name__)
 _COST_LABEL = "Coste de red de ida y vuelta asumible"
@@ -347,6 +354,7 @@ class CopyPipeline:
 
         # 8-9. risk engine (limits + sizing + reservation)
         exit_mode = info.exit_mode_override or cfg.exits.default_mode
+        profile = self._exit_profile(info, token, exit_mode, checks)
         size_factors = await self._confluence_and_regime(swap, info.id, checks)
         rd = await self.risk.evaluate_entry(
             EntryRequest(
@@ -357,6 +365,7 @@ class CopyPipeline:
                 exit_mode=exit_mode,
                 is_high_risk=is_high_risk,
                 size_factors=size_factors,
+                stop_loss_pct=profile.stop_loss_pct,
             )
         )
         state["sizing"] = rd.sizing
@@ -441,8 +450,10 @@ class CopyPipeline:
             "theoretical_price_usd": theoretical,
             "trace_id": ctx.trace_id,
             "exit_params": {
-                "stop_loss_pct": cfg.exits.stop_loss_pct,
+                "stop_loss_pct": profile.stop_loss_pct or cfg.exits.stop_loss_pct,
                 "emergency_stop_loss_pct": cfg.exits.emergency_stop_loss_pct,
+                "adaptive": profile.to_dict(),
+                "entry_liquidity_usd": token.liquidity_usd,
             },
         }
         result = await self.execution.execute(req, quote=quote, context=order_ctx, reservation_id=rd.reservation_id)
@@ -476,6 +487,30 @@ class CopyPipeline:
         )
         return SignalStatus.APPROVED if pending else SignalStatus.FAILED
 
+    def _exit_profile(
+        self, info: WalletInfo, token: TokenInfo, exit_mode: ExitMode, checks: list[CheckResult]
+    ) -> ExitProfile:
+        """Stop from the token's volatility, time limit and take profits from the wallet's style."""
+        if exit_mode is ExitMode.MIRROR:
+            return ExitProfile()  # a pure mirror only follows the source (plus the emergency stop)
+        profile = build_exit_profile(
+            self._config().exits,
+            hourly_volatility=token.hourly_volatility(),
+            median_hold_minutes=info.median_hold_seconds / 60 if info.median_hold_seconds else None,
+            median_win_pct=info.median_win_pct,
+        )
+        checks.append(
+            CheckResult(
+                "exit_profile",
+                "Perfil de salida",
+                True,
+                profile.stop_loss_pct and round(profile.stop_loss_pct, 1),
+                message=" · ".join(profile.notes) or "configuración general (sin datos para adaptarla)",
+                critical=False,
+            )
+        )
+        return profile
+
     async def _confluence_and_regime(
         self, swap: SwapEvent, wallet_id: int, checks: list[CheckResult]
     ) -> tuple[tuple[str, str, float], ...]:
@@ -488,11 +523,8 @@ class CopyPipeline:
         others = []
         for wid in buyers - {wallet_id}:
             other = self.signals.wallet_by_id(wid)
-            # Evidence only from wallets that are worth following themselves: blocked ones (wash trading,
-            # coordinated clusters…) are not independent, and wallets without a copyable edge are noise.
-            if other is None or not other.tracked or other.status is WalletStatus.BLOCKED:
-                continue
-            if other.status is WalletStatus.ACTIVE or (other.copy_edge_pct or 0.0) > 0:
+            # evidence only from wallets that are worth following themselves
+            if other is not None and other.tracked and credible(other):
                 others.append(other.label or other.address[:6])
         n = len(others)
         who = f": {', '.join(sorted(others)[:5])}" if others else ""

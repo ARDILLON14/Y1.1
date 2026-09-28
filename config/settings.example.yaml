@@ -272,6 +272,27 @@ exits:                                # [en caliente]  gestión de salida
   price_poll_seconds: 5
   stale_price_alert_seconds: 120
   exit_slippage_pct: 10
+  # --- perfil adaptativo (se calcula al abrir la posición y se queda con ella).
+  # Desactivado: en el backtest simulado bajó el resultado. Compáralo antes con una variante.
+  volatility_stop: false               # stop = N × el movimiento esperado del token mientras lo tengas;
+  volatility_stop_sigmas: 2            # el tamaño se ajusta para arriesgar lo mismo
+  volatility_stop_min_pct: 8
+  volatility_stop_max_pct: 35          # ≤ emergency_stop_loss_pct
+  wallet_exit_profile: false           # tiempo máximo y take profit según cómo opera la wallet
+  profile_hold_multiple: 3             # tiempo máx = 3 × su holding mediano
+  profile_min_hold_minutes: 30
+  profile_max_hold_minutes: 4320
+  profile_take_profit: true            # niveles de TP escalados hacia su ganancia mediana
+  profile_tp_min_scale: 0.5
+  profile_tp_max_scale: 2
+  # --- salidas de protección
+  liquidity_drop_exit_pct: 50          # vender todo si la liquidez cae un 50 % desde la entrada; null = no
+  liquidity_check_seconds: 30
+  liquidity_exit_confirmations: 2      # comprobaciones seguidas (evita falsas alarmas de datos)
+  wallet_sells_exit_min: 0             # N wallets fiables venden → salir; 0 = desactivada (no ayudó en backtest)
+  wallet_sells_window_minutes: 60
+  wallet_sells_min_fraction: 0.5       # cada una vendió al menos la mitad de lo que tenía
+  wallet_sells_exit_fraction: 1.0      # qué parte de la posición vender
 
 execution:                            # [en caliente, salvo las claves bloqueadas]
   quote_mint: So11111111111111111111111111111111111111112   # [bloqueada] pagar en SOL

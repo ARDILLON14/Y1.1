@@ -137,6 +137,7 @@ class Container:
             token_locks=self.token_locks,
         )
         self.execution.fill_applier = self.positions
+        self.positions.wallet_info = self.signals.wallet_by_id
         self.pipeline = CopyPipeline(
             db=self.db,
             clock=self.clock,

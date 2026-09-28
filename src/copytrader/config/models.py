@@ -397,6 +397,34 @@ class ExitsSection(Section):
     price_poll_seconds: float = Field(5.0, gt=0)
     stale_price_alert_seconds: float = Field(120.0, gt=0)
     exit_slippage_pct: float = Field(10.0, gt=0, le=HL.HARD_MAX_EXIT_SLIPPAGE_PCT)
+    # --- adaptive profile (positions/adaptive.py): computed at entry, kept by the position.
+    # Off by default: in the simulated walk-forward it lowered the return (see docs/REVIEW.md);
+    # compare it with a backtest variant and in paper before turning it on.
+    # Stop = sigmas x the token's expected move while we hold it (sizing keeps the risk constant).
+    volatility_stop: bool = False
+    volatility_stop_sigmas: float = Field(2.0, gt=0, le=5)
+    volatility_stop_min_pct: float = Field(8.0, gt=0, lt=100)
+    volatility_stop_max_pct: float = Field(35.0, gt=0, lt=100)
+    # Time limit and take profits from how the source wallet trades.
+    wallet_exit_profile: bool = False
+    profile_hold_multiple: float = Field(3.0, gt=0, le=20)  # max hold = N x its median holding time
+    profile_min_hold_minutes: float = Field(30.0, gt=0)
+    profile_max_hold_minutes: float = Field(4320.0, gt=0)
+    profile_take_profit: bool = True  # scale the TP levels towards its median winning trade
+    profile_tp_min_scale: float = Field(0.5, gt=0, le=1)
+    profile_tp_max_scale: float = Field(2.0, ge=1, le=5)
+    # --- protective exits (every mode except the pure mirror for wallet sells)
+    # Liquidity of the pool down this % since entry (confirmed N checks in a row) → sell everything.
+    liquidity_drop_exit_pct: float | None = Field(50.0, gt=0, lt=100)
+    liquidity_check_seconds: float = Field(30.0, ge=5)
+    liquidity_exit_confirmations: int = Field(2, ge=1, le=10)
+    # N credible tracked wallets (the source included) sold at least min_fraction of their
+    # holding since we entered → sell exit_fraction. 0 = off (default: in the simulated walk-forward
+    # it did not help, and hurt in SMART mode; measure it before using it).
+    wallet_sells_exit_min: int = Field(0, ge=0, le=10)
+    wallet_sells_window_minutes: float = Field(60.0, gt=0)
+    wallet_sells_min_fraction: float = Field(0.5, gt=0, le=1)
+    wallet_sells_exit_fraction: float = Field(1.0, gt=0, le=1)
 
     @field_validator("take_profit_levels")
     @classmethod
@@ -410,6 +438,12 @@ class ExitsSection(Section):
     def _stops(self) -> ExitsSection:
         if self.emergency_stop_loss_pct < self.stop_loss_pct:
             raise ValueError("exits.emergency_stop_loss_pct must be >= exits.stop_loss_pct")
+        if self.volatility_stop_min_pct > self.volatility_stop_max_pct:
+            raise ValueError("exits.volatility_stop_min_pct must be <= volatility_stop_max_pct")
+        if self.volatility_stop_max_pct > self.emergency_stop_loss_pct:
+            raise ValueError("exits.volatility_stop_max_pct must be <= emergency_stop_loss_pct")
+        if self.profile_min_hold_minutes > self.profile_max_hold_minutes:
+            raise ValueError("exits.profile_min_hold_minutes must be <= profile_max_hold_minutes")
         return self
 
 

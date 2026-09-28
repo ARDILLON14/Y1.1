@@ -48,6 +48,7 @@ class WalletMetrics:
     avg_win_usd: float | None = None
     avg_loss_usd: float | None = None
     avg_win_pct: float | None = None
+    median_win_pct: float | None = None  # typical winning trade (outliers do not move it)
     avg_loss_pct: float | None = None
     payoff_ratio: float | None = None
     profit_factor: float | None = None
@@ -226,6 +227,7 @@ def compute_metrics(
     if win_tr:
         m.avg_win_usd = stats.mean([t.pnl_usd for t in win_tr])
         m.avg_win_pct = 100 * (stats.mean([t.return_frac for t in win_tr]) or 0.0)
+        m.median_win_pct = 100 * (stats.median([t.return_frac for t in win_tr]) or 0.0)
     if loss_tr:
         m.avg_loss_usd = abs(stats.mean([t.pnl_usd for t in loss_tr]) or 0.0)
         m.avg_loss_pct = abs(100 * (stats.mean([t.return_frac for t in loss_tr]) or 0.0))

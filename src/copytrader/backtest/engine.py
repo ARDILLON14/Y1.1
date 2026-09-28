@@ -33,11 +33,12 @@ from copytrader.analysis import stats
 from copytrader.analysis.analyzer import PriceAt, TokenContext, WalletAnalyzer
 from copytrader.analysis.replication import ReplicationParams, build_params
 from copytrader.config.models import AppConfig
-from copytrader.core.models import SwapEvent
-from copytrader.core.types import ExitMode, ListType, Side
+from copytrader.core.models import PRICE_CHANGE_WINDOWS, SwapEvent, hourly_volatility_from_changes
+from copytrader.core.types import ExitMode, ListType, Side, WalletStatus
 from copytrader.detection.detector import SuspicionDetector
 from copytrader.detection.rules import CoordinationIndex, DetectionContext
 from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd, swap_fee_lamports
+from copytrader.positions.adaptive import build_exit_profile, effective_exits
 from copytrader.positions.exits import PositionView, evaluate_exit, source_sell_fraction
 from copytrader.risk.sizing import SizingInput, compute_size
 from copytrader.scoring.scorer import ScoringEngine
@@ -96,6 +97,20 @@ class _Pos:
     opened_at: datetime
     at_risk: float
     tp_hit: list[int] = field(default_factory=list)
+    adaptive: dict[str, Any] = field(default_factory=dict)  # exit profile fixed at entry
+    entry_liquidity: float | None = None
+    # sells of credible wallets since entry: (wallet, time, balance before, balance after)
+    sells: list[tuple[str, datetime, float, float]] = field(default_factory=list)
+    wallet_exit_done: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class WalletFacts:
+    """What the training window says about a wallet (exit profile, credibility)."""
+
+    median_hold_minutes: float | None
+    median_win_pct: float | None
+    credible: bool
 
 
 @dataclass
@@ -116,9 +131,16 @@ class _Book:
 
 
 class Backtester:
-    def __init__(self, config: Callable[[], AppConfig], *, price_at: PriceAt | None = None) -> None:
+    def __init__(
+        self,
+        config: Callable[[], AppConfig],
+        *,
+        price_at: PriceAt | None = None,
+        liquidity_at: PriceAt | None = None,
+    ) -> None:
         self._config = config
         self.price_at = price_at
+        self.liquidity_at = liquidity_at
         self.analyzer = WalletAnalyzer(config)
         self.detector = SuspicionDetector()
         self.scorer = ScoringEngine(config)
@@ -134,7 +156,7 @@ class Backtester:
         previous: set[str],
         top_n: int,
         replication: ReplicationParams | None = None,
-    ) -> tuple[set[str], dict[str, float], dict[str, float]]:
+    ) -> tuple[set[str], dict[str, float], dict[str, float], dict[str, WalletFacts]]:
         cfg = self._config()
         lo = t - timedelta(days=train_days)
         window = {w: [s for s in ss if lo <= s.block_time < t] for w, ss in swaps.items()}
@@ -149,6 +171,7 @@ class Backtester:
         cands: list[Candidate] = []
         scores: dict[str, float] = {}
         pnl: dict[str, float] = {}
+        facts: dict[str, WalletFacts] = {}
         for i, (w, a) in enumerate(analyses.items()):
             flags = self.detector.detect(
                 DetectionContext(a, tokens, coordination, cfg.detection, cfg.scoring.degradation, t)
@@ -164,9 +187,16 @@ class Backtester:
             scores[w] = sc.score
             pnl[w] = a.all.realized_pnl_usd
             cands.append(Candidate(i, w, sc.score, st.status, lists.get(w, ListType.NONE)))
+            edge = a.all.copy_expectancy_pct
+            facts[w] = WalletFacts(
+                a.all.median_holding_minutes,
+                a.all.median_win_pct,
+                st.status is not WalletStatus.BLOCKED
+                and (st.status is WalletStatus.ACTIVE or (edge is not None and edge > 0)),
+            )
         sel_cfg = cfg.selection.model_copy(update={"top_n": top_n})
         selection = select_wallets(cands, previous, sel_cfg)
-        return selection.addresses, scores, pnl
+        return selection.addresses, scores, pnl, facts
 
     # ----------------------------------------------------------- simulation
     def _price(self, mint: str, ts: datetime, fallback: float | None) -> float | None:
@@ -176,6 +206,54 @@ class Backtester:
                 return px
         return fallback
 
+    def _wallet_sell(
+        self,
+        pos: _Pos,
+        ev: SwapEvent,
+        when: datetime,
+        price: float,
+        params: BacktestParams,
+        facts: dict[str, WalletFacts],
+        close: Callable[[_Pos, float, float, datetime, str], None],
+    ) -> None:
+        """Several credible wallets getting out of a token we hold (same rule as live)."""
+        ex = self._config().exits
+        wf = facts.get(ev.wallet)
+        if (
+            ex.wallet_sells_exit_min <= 0
+            or params.exit_mode is ExitMode.MIRROR
+            or pos.wallet_exit_done
+            or wf is None
+            or not wf.credible
+            or ev.block_time < pos.opened_at
+            or ev.token_balance_before is None
+            or ev.token_balance_after is None
+        ):
+            return
+        pos.sells.append((ev.wallet, ev.block_time, ev.token_balance_before, ev.token_balance_after))
+        since = ev.block_time - timedelta(minutes=ex.wallet_sells_window_minutes)
+        first: dict[str, float] = {}
+        last: dict[str, float] = {}
+        for wallet, ts, before, after in pos.sells:
+            if ts >= since:
+                first.setdefault(wallet, before)
+                last[wallet] = after
+        sold = [w for w, b in first.items() if b > 0 and (b - last[w]) / b >= ex.wallet_sells_min_fraction - 1e-9]
+        if len(sold) >= ex.wallet_sells_exit_min:
+            pos.wallet_exit_done = True
+            close(pos, ex.wallet_sells_exit_fraction, price, when, "wallets_selling")
+
+    def _hourly_volatility(self, mint: str, when: datetime, price: float) -> float | None:
+        """The same crude estimate as live (price change over 5 min, 1 h, 6 h, 24 h), from the price path."""
+        if self.price_at is None or price <= 0:
+            return None
+        changes: dict[str, float] = {}
+        for key, minutes in PRICE_CHANGE_WINDOWS.items():
+            before = self.price_at(mint, when - timedelta(minutes=minutes))
+            if before:
+                changes[key] = (price / before - 1) * 100
+        return hourly_volatility_from_changes(changes)
+
     def _simulate(
         self,
         book: _Book,
@@ -184,8 +262,11 @@ class Backtester:
         scores: dict[str, float],
         t0: datetime,
         t1: datetime,
+        facts: dict[str, WalletFacts] | None = None,
     ) -> None:
         cfg = self._config()
+        ex = cfg.exits
+        facts = facts or {}
         lat = timedelta(seconds=params.latency_seconds)
         last_px: dict[str, float] = {}
         sol_px = next((ev.sol_price_usd for ev, _ in events if ev.sol_price_usd), FALLBACK_SOL_PRICE_USD)
@@ -237,8 +318,17 @@ class Backtester:
                         continue
                     last_px[pos.mint] = px
                     pos.peak = max(pos.peak, px)
+                    if (
+                        ex.liquidity_drop_exit_pct is not None
+                        and self.liquidity_at is not None
+                        and pos.entry_liquidity
+                        and (liq := self.liquidity_at(pos.mint, next_tick)) is not None
+                        and (1 - liq / pos.entry_liquidity) * 100 >= ex.liquidity_drop_exit_pct
+                    ):
+                        close(pos, 1.0, px, next_tick, "liquidity_drop")
+                        continue
                     view = PositionView(pos.entry_price, pos.peak, pos.opened_at, params.exit_mode, tuple(pos.tp_hit))
-                    d = evaluate_exit(view, px, next_tick, cfg.exits)
+                    d = evaluate_exit(view, px, next_tick, effective_exits(ex, pos.adaptive))
                     if d is not None:
                         if d.tp_level is not None:
                             pos.tp_hit.append(d.tp_level)
@@ -257,11 +347,15 @@ class Backtester:
             last_px[ev.token_mint] = base
             if ev.side is Side.SELL:
                 pos = book.positions.get(ev.token_mint)
-                if pos is None or pos.wallet != ev.wallet:
+                if pos is None:
                     continue
-                fraction = source_sell_fraction(ev.sold_fraction, params.exit_mode, cfg.exits)
-                if fraction:
-                    close(pos, fraction, base, when, "source_sell")
+                if pos.wallet == ev.wallet:
+                    fraction = source_sell_fraction(ev.sold_fraction, params.exit_mode, cfg.exits)
+                    if fraction:
+                        close(pos, fraction, base, when, "source_sell")
+                        pos = book.positions.get(ev.token_mint)
+                if pos is not None:
+                    self._wallet_sell(pos, ev, when, base, params, facts, close)
                 continue
             if not copyable or ev.token_mint in book.positions:
                 continue
@@ -269,7 +363,19 @@ class Backtester:
             exposure = equity - book.cash
             if len(book.positions) >= cfg.risk.max_open_positions:
                 continue
-            stop = cfg.exits.emergency_stop_loss_pct if params.exit_mode is ExitMode.MIRROR else cfg.exits.stop_loss_pct
+            profile = None
+            if params.exit_mode is not ExitMode.MIRROR:
+                wf = facts.get(ev.wallet)
+                profile = build_exit_profile(
+                    ex,
+                    hourly_volatility=self._hourly_volatility(ev.token_mint, when, base),
+                    median_hold_minutes=wf.median_hold_minutes if wf else None,
+                    median_win_pct=wf.median_win_pct if wf else None,
+                )
+            if params.exit_mode is ExitMode.MIRROR:
+                stop = ex.emergency_stop_loss_pct
+            else:
+                stop = (profile.stop_loss_pct if profile else None) or ex.stop_loss_pct
             sizing_capital = min(params.capital_usd, equity)
             size = compute_size(
                 SizingInput(
@@ -314,6 +420,9 @@ class Backtester:
                 price,
                 when,
                 size.size_usd * stop / 100,
+                adaptive=profile.to_dict() if profile else {},
+                entry_liquidity=ev.liquidity_usd
+                or (self.liquidity_at(ev.token_mint, when) if self.liquidity_at is not None else None),
             )
         tick_until(t1)
         book.curve.append((t1, book.equity(mark)))
@@ -357,7 +466,7 @@ class Backtester:
         t = start
         while t < end:
             t1 = min(end, t + timedelta(days=params.test_days))
-            selected, scores, pnl = self._select(
+            selected, scores, pnl, facts = self._select(
                 swaps, lists, t, params.train_days, tokens, previous, params.top_n, replication
             )
             previous = selected
@@ -366,7 +475,7 @@ class Backtester:
             window_events = [s for s, _ in ordered if t <= s.block_time < t1]
             for name, chosen in (("strategy", selected), ("copy_all", eligible), ("top_pnl", naive)):
                 events = [(s, s.wallet in chosen) for s in window_events]
-                self._simulate(strategies[name], events, params, scores, t, t1)
+                self._simulate(strategies[name], events, params, scores, t, t1, facts)
             windows.append(
                 {
                     "start": t.isoformat(),

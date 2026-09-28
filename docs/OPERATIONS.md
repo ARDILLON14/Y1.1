@@ -345,5 +345,9 @@ o activar un kill switch.
   se va en comisiones. Las wallets que pierden al copiarlas pasan solas a
   OBSERVAR ("Copiarla pierde en la práctica"); revisa si fue mala suerte o un
   cambio real antes de volver a incluirlas.
+- *Análisis → Por motivo de salida*: qué salidas ganan y cuáles pierden. Si
+  activas una salida nueva (stop por volatilidad, perfil de la wallet, ventas
+  de varias wallets), pruébala antes con una variante del backtest y vigílala
+  aquí en paper.
 - Slippage real frente al configurado.
 - Que el resultado no dependa de 1-2 operaciones.

@@ -70,6 +70,26 @@ class SwapEvent:
         return (self.detected_at - self.block_time).total_seconds() * 1000.0
 
 
+# minutes covered by each price-change window (DexScreener keys)
+PRICE_CHANGE_WINDOWS = {"m5": 5, "h1": 60, "h6": 360, "h24": 1440}
+
+
+def hourly_volatility_from_changes(price_change_pct: dict[str, float] | None) -> float | None:
+    """Crude hourly volatility estimate (fraction) from price-change windows (in %).
+
+    Uses the largest of |m5|·√12, |h1|, |h6|/√6 and |h24|/√24 so that a
+    token that is moving violently right now is not diluted by a calm day.
+    """
+    if not price_change_pct:
+        return None
+    candidates: list[float] = []
+    for key, minutes in PRICE_CHANGE_WINDOWS.items():
+        value = price_change_pct.get(key)
+        if value is not None:
+            candidates.append(abs(value) / 100.0 * math.sqrt(60 / minutes))
+    return max(candidates) if candidates else None
+
+
 @dataclass(slots=True)
 class TokenInfo:
     """Market + risk snapshot of a token, merged from several providers."""
@@ -105,21 +125,7 @@ class TokenInfo:
         return max(0.0, (now - self.pair_created_at).total_seconds() / 60.0)
 
     def hourly_volatility(self) -> float | None:
-        """Crude hourly volatility estimate (fraction) from price-change windows.
-
-        Uses the largest of |m5|·√12, |h1|, |h6|/√6 and |h24|/√24 so that a
-        token that is moving violently right now is not diluted by a calm day.
-        """
-        pc = self.price_change_pct
-        if not pc:
-            return None
-        candidates: list[float] = []
-        scale = {"m5": math.sqrt(12), "h1": 1.0, "h6": 1 / math.sqrt(6), "h24": 1 / math.sqrt(24)}
-        for key, factor in scale.items():
-            value = pc.get(key)
-            if value is not None:
-                candidates.append(abs(value) / 100.0 * factor)
-        return max(candidates) if candidates else None
+        return hourly_volatility_from_changes(self.price_change_pct)
 
     def age_seconds_of_data(self, now: datetime) -> float:
         return (now - self.fetched_at).total_seconds()

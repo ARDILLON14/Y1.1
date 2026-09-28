@@ -144,6 +144,37 @@ class TransactionRepo:
         )
         return {int(w) for w in (await self.s.execute(stmt.distinct())).scalars().all()}
 
+    async def sellers_between(self, mint: str, start: datetime, end: datetime, min_sold_fraction: float) -> set[int]:
+        """Wallets that sold at least ``min_sold_fraction`` of their ``mint`` holding in [start, end].
+
+        Several smaller sells add up: the fraction is measured from the balance before the first
+        sell of the window to the balance after the last one.
+        """
+        stmt = (
+            select(
+                WalletTransaction.wallet_id,
+                WalletTransaction.token_balance_before,
+                WalletTransaction.token_balance_after,
+            )
+            .where(
+                WalletTransaction.token_mint == mint,
+                WalletTransaction.side == Side.SELL.value,
+                WalletTransaction.block_time >= start,
+                WalletTransaction.block_time <= end,
+            )
+            .order_by(WalletTransaction.block_time, WalletTransaction.id)
+        )
+        first: dict[int, float] = {}
+        last: dict[int, float] = {}
+        for wallet_id, before, after in (await self.s.execute(stmt)).all():
+            if before is None or after is None:
+                continue
+            first.setdefault(int(wallet_id), float(before))
+            last[int(wallet_id)] = float(after)
+        return {
+            w for w, before in first.items() if before > 0 and (before - last[w]) / before >= min_sold_fraction - 1e-9
+        }
+
     async def last_for_wallet_token(self, wallet_id: int, mint: str) -> WalletTransaction | None:
         stmt = (
             select(WalletTransaction)

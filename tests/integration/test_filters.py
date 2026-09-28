@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -106,7 +107,8 @@ async def test_sell_route_is_quoted_with_the_buy_and_reused_for_the_same_token(c
     await c.pipeline._check_sell_route(ctx, quote, checks, TradeMode.PAPER)
     assert not calls and checks[-1].passed and "verificado hace" in checks[-1].message
     # ...but not once the cache time is over
-    c.pipeline._sell_ok[mint] = (*c.pipeline._sell_ok[mint][:2], 0.0)
+    expired = time.monotonic() - c.cfg.filters.sell_route_cache_seconds - 1
+    c.pipeline._sell_ok[mint] = (*c.pipeline._sell_ok[mint][:2], expired)
     await c.pipeline._check_sell_route(ctx, quote, checks, TradeMode.PAPER)
     assert [call[0] for call in calls] == ["sell"]
 

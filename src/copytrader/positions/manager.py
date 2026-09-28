@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
@@ -43,13 +43,15 @@ from copytrader.db.models import Order, Position
 from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
+from copytrader.positions.adaptive import effective_exits
 from copytrader.positions.exits import ExitDecision, PositionView, evaluate_exit, source_sell_fraction
 from copytrader.providers.interfaces import TokenInfoProvider
 from copytrader.resilience.rate_limiter import Priority
-from copytrader.signals.engine import SignalContext
+from copytrader.signals.engine import SignalContext, WalletInfo, credible
 
 log = structlog.get_logger(__name__)
 DUST_FRACTION = 0.001
+WALLETS_SELLING = "wallets_selling"
 SOURCE_EXIT_GRACE_SECONDS = 20.0
 
 
@@ -75,6 +77,10 @@ class PositionManager:
         self._backoff: dict[int, tuple[float, int]] = {}  # position -> (retry at monotonic, failures)
         self._stale_alerted: set[int] = set()
         self._stopped = asyncio.Event()
+        # wallet id -> what we know about it (set by the container: SignalEngine.wallet_by_id)
+        self.wallet_info: Callable[[int], WalletInfo | None] = lambda _id: None
+        self._liquidity_checked_at = float("-inf")
+        self._liquidity_low: dict[int, int] = {}  # position -> consecutive checks below the threshold
 
     # ================================================================ fills
     async def apply_fill(self, session: AsyncSession, order: Order, result: ExecutionResult) -> float | None:
@@ -154,6 +160,11 @@ class PositionManager:
         tp = ctx.get("tp_level")
         if tp is not None and tp not in (pos.tp_levels_hit or []):
             pos.tp_levels_hit = [*list(pos.tp_levels_hit or []), tp]
+        once = ctx.get("once")
+        if once:  # a partial exit that must not repeat (e.g. several wallets selling)
+            params = dict(pos.exit_params or {})
+            params["done"] = sorted({*params.get("done", []), once})
+            pos.exit_params = params
         if pos.qty_raw <= pos.initial_qty_raw * DUST_FRACTION:
             pos.status = PositionStatus.CLOSED.value
             pos.closed_at = now
@@ -219,6 +230,7 @@ class PositionManager:
         trace_id: str | None = None,
         tp_level: int | None = None,
         source_price_usd: float | None = None,
+        once: str | None = None,
     ) -> ExecutionResult | None:
         async with self.db.session() as s:
             pos = await PositionRepo(s).get(position_id)
@@ -251,6 +263,7 @@ class PositionManager:
                     "reason": reason,
                     "trigger": trigger,
                     "tp_level": tp_level,
+                    "once": once,
                     "token_symbol": pos.token_symbol,
                     "token_mint": pos.token_mint,
                     "source_wallet_id": pos.source_wallet_id,
@@ -399,22 +412,110 @@ class PositionManager:
                     exit_mode=ExitMode(p.exit_mode),
                     tp_levels_hit=tuple(p.tp_levels_hit or ()),
                 )
-                decision = evaluate_exit(view, price, now, cfg.exits)
+                # the position's own profile (volatility stop, wallet timing) over the live config
+                exits_cfg = effective_exits(cfg.exits, (p.exit_params or {}).get("adaptive"))
+                decision = evaluate_exit(view, price, now, exits_cfg)
                 if decision is not None:
                     to_exit.append((p.id, decision))
         exiting = {pid for pid, _ in to_exit}
+        for pid, decision in await self._liquidity_exits(positions, exiting):
+            to_exit.append((pid, decision))
+            exiting.add(pid)
         for p in positions:
-            if p.id not in exiting and p.status == PositionStatus.OPEN.value:
-                missed = await self._missed_source_exit(p)
-                if missed is not None:
-                    to_exit.append((p.id, missed))
+            if p.id in exiting or p.status != PositionStatus.OPEN.value:
+                continue
+            extra = await self._wallet_sells_exit(p, now) or await self._missed_source_exit(p)
+            if extra is not None:
+                to_exit.append((p.id, extra))
         for pid, decision in to_exit:
             retry_at, _ = self._backoff.get(pid, (0.0, 0))
             if self.clock.monotonic() < retry_at:
                 continue
             await self.exit_position(
-                pid, decision.fraction, decision.trigger, decision.reason, tp_level=decision.tp_level
+                pid,
+                decision.fraction,
+                decision.trigger,
+                decision.reason,
+                tp_level=decision.tp_level,
+                once=decision.trigger if decision.trigger == WALLETS_SELLING and not decision.full else None,
             )
+
+    async def _liquidity_exits(self, positions: list[Position], exiting: set[int]) -> list[tuple[int, ExitDecision]]:
+        """Sell when the pool's liquidity collapsed since entry (rug, LP pulled): the price that
+        remains cannot be sold into. Needs the drop on N consecutive checks (data glitches)."""
+        ex = self._config().exits
+        now = self.clock.monotonic()
+        if ex.liquidity_drop_exit_pct is None or now - self._liquidity_checked_at < ex.liquidity_check_seconds:
+            return []
+        self._liquidity_checked_at = now
+        watch = [
+            p
+            for p in positions
+            if p.status == PositionStatus.OPEN.value
+            and p.id not in exiting
+            and (p.exit_params or {}).get("entry_liquidity_usd")
+        ]
+        if not watch:
+            return []
+        try:
+            infos = await self.tokens.get_many(
+                sorted({p.token_mint for p in watch}), max_age_seconds=ex.liquidity_check_seconds
+            )
+        except CopyTraderError as exc:
+            log.warning("liquidity_check_failed", error=str(exc))
+            return []
+        watched = {p.id for p in watch}
+        self._liquidity_low = {pid: n for pid, n in self._liquidity_low.items() if pid in watched}
+        out: list[tuple[int, ExitDecision]] = []
+        for p in watch:
+            entry_liq = float(p.exit_params["entry_liquidity_usd"])
+            info = infos.get(p.token_mint)
+            liq = info.liquidity_usd if info is not None else None
+            if liq is None or entry_liq <= 0:
+                continue  # unknown now: no evidence either way
+            drop = (1 - liq / entry_liq) * 100
+            if drop < ex.liquidity_drop_exit_pct:
+                self._liquidity_low.pop(p.id, None)
+                continue
+            seen = self._liquidity_low.get(p.id, 0) + 1
+            self._liquidity_low[p.id] = seen
+            if seen >= ex.liquidity_exit_confirmations:
+                out.append(
+                    (
+                        p.id,
+                        ExitDecision(
+                            1.0,
+                            "liquidity_drop",
+                            f"Liquidez -{drop:.0f}% desde la entrada ({entry_liq:,.0f} → {liq:,.0f} USD)",
+                        ),
+                    )
+                )
+        return out
+
+    async def _wallet_sells_exit(self, p: Position, now: datetime) -> ExitDecision | None:
+        """Several credible wallets we follow (the source included) are getting out of the token."""
+        ex = self._config().exits
+        if ex.wallet_sells_exit_min <= 0 or ExitMode(p.exit_mode) is ExitMode.MIRROR:
+            return None
+        if WALLETS_SELLING in (p.exit_params or {}).get("done", []):
+            return None  # the partial exit already happened
+        start = max(p.opened_at, now - timedelta(minutes=ex.wallet_sells_window_minutes))
+        async with self.db.session() as s:
+            sellers = await TransactionRepo(s).sellers_between(p.token_mint, start, now, ex.wallet_sells_min_fraction)
+        names = []
+        for wallet_id in sellers:
+            info = self.wallet_info(wallet_id)
+            if info is not None and credible(info):
+                names.append(info.label or info.address[:6])
+        if len(names) < ex.wallet_sells_exit_min:
+            return None
+        share = "todo" if ex.wallet_sells_exit_fraction >= 0.999 else f"{ex.wallet_sells_exit_fraction:.0%}"
+        return ExitDecision(
+            ex.wallet_sells_exit_fraction,
+            WALLETS_SELLING,
+            f"{len(names)} wallets fiables vendieron ≥{ex.wallet_sells_min_fraction:.0%} desde la entrada "
+            f"({', '.join(sorted(names)[:5])}): vende {share}",
+        )
 
     async def _quote_exit_price(self, p: Position) -> float | None:
         """USD price per token implied by a sell quote for the whole position."""

@@ -16,7 +16,7 @@ export async function render(root) {
       { label: "Token", render: (p) => h("span", { title: p.token_mint }, p.token_symbol || short(p.token_mint)) },
       { label: "Modo", render: (p) => p.mode.toUpperCase() },
       { label: "Wallet origen", render: (p) => (p.source_wallet ? addr(p.source_wallet, p.source_wallet_label) : "—") },
-      { label: "Salida", render: (p) => p.exit_mode_label },
+      { label: "Salida", render: exitCell },
       { label: "Entrada", num: true, render: (p) => price(p.entry_price_usd) },
       { label: "Actual", num: true, render: (p) => price(p.last_price_usd) },
       { label: "Cambio", num: true, render: (p) => h("span", { class: signClass(p.change_pct) }, pct(p.change_pct, 1, true)) },
@@ -36,4 +36,12 @@ export async function render(root) {
           } }, p.status === "closing" ? "Cerrando…" : "Cerrar") }
         : { label: "Motivo de cierre", wrap: true, render: (p) => `${p.close_reason || "—"} · ${dt(p.closed_at)}` },
     ], rows, { empty: status === "open" ? "Sin posiciones abiertas" : "Sin posiciones cerradas" })));
+}
+
+// Exit mode + the stop this position was sized for; an adapted profile explains itself on hover.
+function exitCell(p) {
+  const notes = p.exit_profile?.notes || [];
+  const stop = p.exit_mode === "mirror" || p.stop_loss_pct == null ? "" : ` · SL ${pct(p.stop_loss_pct, 1)}`;
+  return h("span", { class: "nowrap", title: notes.join("\n") || null },
+    `${p.exit_mode_label}${stop}`, notes.length ? h("span", { class: "muted small" }, " · adaptada") : null);
 }

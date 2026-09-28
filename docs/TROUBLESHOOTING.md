@@ -209,6 +209,18 @@ La salida falla repetidamente (sin liquidez, slippage mayor que
 `exits.exit_slippage_pct`). Se sigue reintentando con espera creciente. Puedes
 subir temporalmente `exits.exit_slippage_pct` (máximo absoluto 50 %).
 
+**Posición cerrada por "Liquidez -X% desde la entrada"**
+La liquidez del pool cayó más de `exits.liquidity_drop_exit_pct` en dos
+comprobaciones seguidas: suele ser un rug o la retirada del LP. Si ves que salta
+por cambios de par en DexScreener (el pool más profundo cambió), sube
+`liquidity_exit_confirmations` o el porcentaje.
+
+**El stop de una posición no coincide con `exits.stop_loss_pct`**
+Con `exits.volatility_stop: true` cada posición guarda el stop con el que se
+dimensionó (*Posiciones*, columna *Salida*; el detalle aparece al pasar el
+ratón). Cambiar la configuración después no lo modifica: la posición se abrió
+con un tamaño calculado para ese stop.
+
 **Quedan cuentas de token vacías en la wallet del bot**
 Solo se cierran con el trading real armado, cada
 `execution.close_accounts_interval_seconds`, y nunca si tienen saldo (aunque

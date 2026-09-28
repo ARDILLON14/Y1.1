@@ -226,6 +226,38 @@ mantiene horas usa el límite global. La decisión indica el límite aplicado.
 
 Cada wallet puede tener su propio modo de salida (detalle de wallet).
 
+**Salidas de protección** (también en modo espejo la de liquidez):
+- `liquidity_drop_exit_pct` (50 % por defecto): si la liquidez del pool cae
+  ese porcentaje desde la entrada en `liquidity_exit_confirmations`
+  comprobaciones seguidas (cada `liquidity_check_seconds`), se vende todo.
+  Detecta un rug o una retirada de liquidez antes de que el precio lo refleje
+  del todo. Es una salida urgente: paga la prioridad máxima.
+- `wallet_sells_exit_min` (desactivada): si N wallets fiables que sigues
+  (activas o con ventaja copiable, nunca bloqueadas; el origen cuenta) venden
+  al menos `wallet_sells_min_fraction` de lo que tenían desde tu entrada y en
+  la última `wallet_sells_window_minutes`, se vende `wallet_sells_exit_fraction`
+  (una sola vez por posición). No se aplica en modo espejo.
+
+**Perfil adaptativo** (desactivado; se fija al abrir cada posición y se muestra
+en *Posiciones* y en la decisión de la señal):
+- `volatility_stop`: stop = `volatility_stop_sigmas` × el movimiento esperado
+  del token durante el tiempo que se espera mantenerlo (holding mediano de la
+  wallet, 1 h si no se conoce), entre `volatility_stop_min_pct` y
+  `volatility_stop_max_pct`. El trailing se escala igual. El **tamaño** se
+  calcula con ese stop, así que el capital en riesgo por operación no cambia:
+  un token más volátil lleva un stop más ancho y una posición más pequeña.
+- `wallet_exit_profile`: tiempo máximo = `profile_hold_multiple` × el holding
+  mediano de la wallet (entre `profile_min_hold_minutes` y
+  `profile_max_hold_minutes`) y, con `profile_take_profit`, los niveles de take
+  profit escalados hacia su ganancia mediana.
+
+Por qué vienen desactivados: en el backtest walk-forward del mercado simulado
+(tres universos distintos) el stop por volatilidad bajó siempre el resultado
+(p. ej. +26 % → +9 % con un drawdown mayor), el perfil de tiempo fue
+inconsistente y la salida por ventas de varias wallets no mejoró el modo
+protegido y empeoró el inteligente. Pruébalos con una variante del backtest y
+en paper (*Análisis → por motivo de salida*) antes de activarlos.
+
 ### `execution`
 Slippage de la transacción, prioridad y tope de priority fee, tiempo de
 confirmación, re-difusión, Jito tip opcional, reintentos de entrada/salida y

@@ -70,7 +70,7 @@ La aplicación se organiza en capas con dependencias en un solo sentido
 | **Copy Pipeline** | `pipeline/` | Los 12 pasos de validación; produce una `Decision` con explicación completa. | `Signal` → `Decision` (+ orden) |
 | **Risk Management Engine** | `risk/` | Límites, estado de PnL por periodo, reservas de exposición atómicas, *kill switches*, *position sizing*, límites absolutos codificados. No conoce wallets ni DEX. | `TradeIntent` → `RiskDecision` |
 | **Execution Engine** | `execution/` | `PaperExecutor` (cotización real + modelo de latencia/fees) y `LiveExecutor` (Jupiter → firma → envío → confirmación) con idempotencia y recuperación. | `OrderRequest` → `ExecutionResult` |
-| **Position Manager** | `positions/` | Posiciones abiertas, modos espejo/protegido/inteligente, SL/TP escalonado/trailing/tiempo máximo, stop de emergencia, cierre al vender la wallet. | Precios + ventas de origen → órdenes de salida |
+| **Position Manager** | `positions/` | Posiciones abiertas, modos espejo/protegido/inteligente, SL/TP escalonado/trailing/tiempo máximo, stop de emergencia, cierre al vender la wallet, salida por caída de liquidez o por ventas de varias wallets, perfil de salida adaptativo por posición (`positions/adaptive.py`). | Precios + liquidez + ventas de wallets → órdenes de salida |
 | **Base de datos** | `db/` | Modelos, repositorios, migraciones. Fuente de verdad para recuperación tras reinicio. | — |
 | **Dashboard / API** | `api/`, `web/` | Resumen, wallets, operaciones, posiciones, alertas, riesgo, configuración, salud, backtesting. | HTTP |
 | **Notificaciones / Alertas** | `notifications/`, `alerts/` | Telegram/Discord con cola, *throttling*, deduplicación y redacción de secretos. | Eventos → mensajes |

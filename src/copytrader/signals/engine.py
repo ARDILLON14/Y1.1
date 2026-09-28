@@ -71,6 +71,7 @@ class WalletInfo:
     median_hold_seconds: float | None = None  # sets how fresh a signal from it must be
     copy_edge_pct: float | None = None  # expected return per copy (effective: estimate + real copies)
     model_cost_pct: float | None = None  # round-trip network cost the estimate already assumed
+    median_win_pct: float | None = None  # its typical winning trade (exit profile)
 
 
 def signal_age_limit(cfg: AppConfig, median_hold_seconds: float | None) -> tuple[float, str]:
@@ -110,6 +111,22 @@ def _copy_edge(metric: WalletMetric | None) -> float | None:
     if value is None:
         value = data.get("copy_expectancy_pct")
     return float(value) if value is not None else None
+
+
+def _median_win(metric: WalletMetric | None) -> float | None:
+    value = (metric.data or {}).get("median_win_pct") if metric is not None else None
+    return float(value) if value else None
+
+
+def credible(info: WalletInfo | None) -> bool:
+    """A wallet whose trades count as independent evidence (confluence, exits by several wallets).
+
+    Blocked wallets (wash trading, coordinated clusters…) are not independent, and wallets without
+    a copyable edge are noise.
+    """
+    if info is None or info.status is WalletStatus.BLOCKED:
+        return False
+    return info.status is WalletStatus.ACTIVE or (info.copy_edge_pct or 0.0) > 0
 
 
 def _model_cost(metric: WalletMetric | None) -> float | None:
@@ -201,6 +218,7 @@ class SignalEngine:
                 median_hold_seconds=_median_hold_seconds(metrics.get(w.id)),
                 copy_edge_pct=_copy_edge(metrics.get(w.id)),
                 model_cost_pct=_model_cost(metrics.get(w.id)),
+                median_win_pct=_median_win(metrics.get(w.id)),
             )
             for w in rows
         }

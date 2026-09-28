@@ -110,6 +110,9 @@ class EntryRequest:
     exit_mode: ExitMode
     is_high_risk: bool
     size_factors: tuple[tuple[str, str, float], ...] = ()
+    # adaptive stop of this position (volatility): sizes it so the capital at risk stays the same,
+    # and replaces the separate volatility size reduction (the stop already accounts for it)
+    stop_loss_pct: float | None = None
 
 
 @dataclass(slots=True)
@@ -295,7 +298,8 @@ class RiskEngine:
         token_cap = max(0.0, sizing_capital * lim.max_token_exposure_pct / 100 - token_exp)
         wallet_cap = max(0.0, sizing_capital * lim.max_risk_per_wallet_pct / 100 - wallet_risk)
         high_cap = max(0.0, sizing_capital * lim.max_high_risk_exposure_pct / 100 - high_risk_exp)
-        stop = self.stop_distance_pct(req.exit_mode)
+        adaptive_stop = req.stop_loss_pct is not None and req.exit_mode is not ExitMode.MIRROR
+        stop = req.stop_loss_pct if adaptive_stop and req.stop_loss_pct else self.stop_distance_pct(req.exit_mode)
         probe = sizing_capital * lim.max_risk_per_trade_pct / max(stop, 1.0)
         sizing: SizingResult = compute_size(
             SizingInput(
@@ -304,7 +308,7 @@ class RiskEngine:
                 stop_distance_pct=stop,
                 wallet_score=req.wallet_score,
                 min_score=cfg.selection.min_score,
-                hourly_volatility=req.token.hourly_volatility(),
+                hourly_volatility=None if adaptive_stop else req.token.hourly_volatility(),
                 liquidity_usd=req.token.liquidity_usd,
                 est_slippage_pct=estimate_slippage_pct(min(probe, lim.max_trade_usd), req.token.liquidity_usd),
                 max_slippage_pct=lim.max_slippage_pct,

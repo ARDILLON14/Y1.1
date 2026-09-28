@@ -79,7 +79,8 @@ async def run_backtest(
         labels = {w.address: w.label for w in wallets}
         market = c.providers.simulated_market
         price_at = market.token_price if market is not None else None
-        bt = Backtester(c.get_cfg, price_at=price_at)
+        liquidity_at = market.liquidity if market is not None else None
+        bt = Backtester(c.get_cfg, price_at=price_at, liquidity_at=liquidity_at)
         result = await asyncio.to_thread(bt.run, dict(swaps), params, lists=lists, tokens=tokens, labels=labels)
         if variant_cfgs and "error" not in result:
             compared: list[dict[str, Any]] = [
@@ -92,7 +93,7 @@ async def run_backtest(
             ]
             for name, patch, cfg_v in variant_cfgs:
                 params_v = BacktestParams.from_config(cfg_v, **(overrides or {}))
-                bt_v = Backtester(_constant(cfg_v), price_at=price_at)
+                bt_v = Backtester(_constant(cfg_v), price_at=price_at, liquidity_at=liquidity_at)
                 res_v = await asyncio.to_thread(
                     bt_v.run, dict(swaps), params_v, lists=lists, tokens=tokens, labels=labels
                 )
