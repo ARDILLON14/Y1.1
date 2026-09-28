@@ -32,7 +32,7 @@ copytrader check-config
 
 | En caliente (dashboard) | Solo editando el YAML y reiniciando |
 |---|---|
-| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest`, `measurement`, `learning` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
+| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest`, `measurement`, `learning`, `filters` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
 
 Claves **bloqueadas** aunque su sección sea editable (requieren YAML + reinicio,
 a propósito, porque controlan el dinero real):
@@ -254,6 +254,36 @@ URL del firmador, ruta del keystore (solo `local`) y tolerancia de reloj HMAC.
 Ventanas de entrenamiento y test, latencia, slippage, comisiones y coeficiente
 de impacto de mercado usados en la simulación. `fee_usd_per_trade: null` usa el
 mismo modelo de costes de red que el paper trading.
+
+### `filters`
+Filtros por señal, aplicados en cada decisión además de los límites de riesgo.
+Cada uno aparece en la explicación de la decisión:
+
+- **Valor esperado de la copia** (`min_expected_value_pct`, 0 % por defecto):
+  la ventaja copiable efectiva de la wallet ya descuenta las comisiones de una
+  copia de tamaño típico; si esta copia es más pequeña, paga proporcionalmente
+  más en comisiones fijas y se resta. Si el resultado queda por debajo del
+  mínimo, no se copia.
+- **Confluencia**: otras wallets seguidas que compraron el mismo token en
+  `confluence_window_minutes`. Solo cuentan las creíbles e independientes: no
+  bloqueadas (las de wash trading o grupos coordinados no cuentan) y ACTIVAS o
+  con ventaja copiable positiva (una wallet aleatoria comprando no confirma nada). Cada una sube el tamaño un
+  `confluence_size_bonus` hasta `confluence_max_mult`; los topes de riesgo
+  siguen mandando. `min_confluence_wallets` permite exigirla.
+- **Riesgos de RugCheck bloqueantes** (`blocked_risk_flags`): si el informe del
+  token incluye un riesgo cuyo nombre contiene alguno de estos textos (holders
+  muy concentrados, un único holder dominante, liquidez sin bloquear, creador
+  con rugs previos…), no se compra. Edita la lista según lo que veas en los
+  avisos de tus señales.
+- **Ruta de venta** (`check_sell_route`): antes de comprar se cotiza la venta
+  de lo que recibirías. Sin ruta de venta, o si comprar y vender al instante
+  perdería más de `max_round_trip_quote_loss_pct`, no se compra. Detecta
+  tokens sin salida o con liquidez de venta muy pobre (no sustituye a los
+  filtros de autoridades y extensiones de Token-2022, que ya se aplican).
+- **Régimen de mercado** (movimiento de SOL en 24 h, calculado en cada
+  evaluación): `regime_size_multipliers` reduce el tamaño en regímenes
+  violentos (×0,5 en caída extrema por defecto) y `block_regimes` detiene las
+  entradas en los que indiques.
 
 ### `learning`
 Aprender de tus propias copias:

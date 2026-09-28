@@ -362,3 +362,22 @@ learning:                             # [en caliente]  aprender de tus propias c
   probation_enabled: true              # con trading real, cada wallet se copia primero en PAPER...
   probation_min_positions: 5           # ...hasta tener 5 copias paper cerradas...
   probation_min_return_pct: 0.0        # ...con un retorno medio de al menos este %
+
+filters:                              # [en caliente]  filtros por señal (además de los límites de riesgo)
+  min_expected_value_pct: 0.0          # valor esperado de ESTA copia tras sus costes (%); null desactiva
+  confluence_window_minutes: 30        # otras wallets creíbles (activas o con ventaja copiable) e independientes
+                                       # (no bloqueadas) que compraron el mismo token...
+  confluence_size_bonus: 0.25          # ...suben el tamaño un 25 % cada una...
+  confluence_max_mult: 1.5             # ...hasta ×1,5 (los topes de riesgo siguen aplicando)
+  min_confluence_wallets: 0            # exigir N wallets más (0 = no exigir)
+  blocked_risk_flags:                  # riesgos de RugCheck que bloquean el token (texto contenido en el nombre)
+    - top 10 holders high ownership
+    - single holder ownership
+    - large amount of lp unlocked
+    - creator history of rugged
+  check_sell_route: true               # antes de comprar, cotizar la venta: sin ruta = no se compra
+  max_round_trip_quote_loss_pct: 10    # pérdida máxima de comprar y vender al instante (impacto ida y vuelta)
+  regime_size_multipliers:             # régimen de mercado (movimiento de SOL en 24 h) → tamaño
+    extreme_down: 0.5
+    extreme_up: 0.75
+  block_regimes: []                    # regímenes sin copias: extreme_up, extreme_down, bull, bear, sideways

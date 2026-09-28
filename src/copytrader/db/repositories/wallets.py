@@ -134,6 +134,16 @@ class TransactionRepo:
         )
         return (await self.s.execute(stmt)).scalars().all()
 
+    async def buyers_between(self, mint: str, start: datetime, end: datetime) -> set[int]:
+        """Wallets that bought ``mint`` in [start, end]."""
+        stmt = select(WalletTransaction.wallet_id).where(
+            WalletTransaction.token_mint == mint,
+            WalletTransaction.side == Side.BUY.value,
+            WalletTransaction.block_time >= start,
+            WalletTransaction.block_time <= end,
+        )
+        return {int(w) for w in (await self.s.execute(stmt.distinct())).scalars().all()}
+
     async def last_for_wallet_token(self, wallet_id: int, mint: str) -> WalletTransaction | None:
         stmt = (
             select(WalletTransaction)

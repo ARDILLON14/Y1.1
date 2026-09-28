@@ -97,6 +97,7 @@ class EvaluationCycle:
         self._listeners: list[SelectionListener] = []
         self._lock = asyncio.Lock()
         self.last_report: CycleReport | None = None
+        self.current_regime: str | None = None  # SOL market regime at the last evaluation
 
     def on_selection(self, listener: SelectionListener) -> None:
         self._listeners.append(listener)
@@ -165,6 +166,7 @@ class EvaluationCycle:
             for mint, t in token_rows.items()
         }
         regimes = await self._regimes(since, now)
+        self.current_regime = regimes.regime(now) if regimes else None
         replication = await self.replication_params() if cfg.analysis.replication_enabled else None
 
         analyses: dict[int, WalletAnalysis] = {}

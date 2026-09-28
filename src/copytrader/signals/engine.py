@@ -69,6 +69,8 @@ class WalletInfo:
     # positions: it keeps being watched, only to mirror its exits.
     tracked: bool = True
     median_hold_seconds: float | None = None  # sets how fresh a signal from it must be
+    copy_edge_pct: float | None = None  # expected return per copy (effective: estimate + real copies)
+    model_cost_pct: float | None = None  # round-trip network cost the estimate already assumed
 
 
 def signal_age_limit(cfg: AppConfig, median_hold_seconds: float | None) -> tuple[float, str]:
@@ -100,6 +102,19 @@ def _duration(seconds: float) -> str:
 def _median_hold_seconds(metric: WalletMetric | None) -> float | None:
     minutes = (metric.data or {}).get("median_holding_minutes") if metric is not None else None
     return float(minutes) * 60 if minutes else None
+
+
+def _copy_edge(metric: WalletMetric | None) -> float | None:
+    data = (metric.data or {}) if metric is not None else {}
+    value = data.get("effective_copy_expectancy_pct")
+    if value is None:
+        value = data.get("copy_expectancy_pct")
+    return float(value) if value is not None else None
+
+
+def _model_cost(metric: WalletMetric | None) -> float | None:
+    value = ((metric.data or {}).get("replication") or {}).get("fixed_cost_pct") if metric is not None else None
+    return float(value) if value is not None else None
 
 
 def copyable(info: WalletInfo) -> bool:
@@ -184,6 +199,8 @@ class SignalEngine:
                 exit_mode_override=ExitMode(w.exit_mode_override) if w.exit_mode_override else None,
                 tracked=w.id in tracked_ids,
                 median_hold_seconds=_median_hold_seconds(metrics.get(w.id)),
+                copy_edge_pct=_copy_edge(metrics.get(w.id)),
+                model_cost_pct=_model_cost(metrics.get(w.id)),
             )
             for w in rows
         }
@@ -194,6 +211,9 @@ class SignalEngine:
 
     def wallet(self, address: str) -> WalletInfo | None:
         return self._wallets.get(address)
+
+    def wallet_by_id(self, wallet_id: int) -> WalletInfo | None:
+        return next((w for w in self._wallets.values() if w.id == wallet_id), None)
 
     # -------------------------------------------------------------- lifecycle
     def start(self) -> None:

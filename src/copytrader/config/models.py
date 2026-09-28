@@ -504,6 +504,45 @@ class SecuritySection(Section):
     hmac_max_skew_seconds: float = Field(30.0, gt=0, le=300)
 
 
+KNOWN_REGIMES = frozenset({"extreme_up", "extreme_down", "bull", "bear", "sideways"})
+
+
+class FiltersSection(Section):
+    """Per-signal filters (pipeline/copy_pipeline.py) on top of the risk limits."""
+
+    # Expected value of THIS copy after its own fixed costs (%). None disables.
+    min_expected_value_pct: float | None = 0.0
+    # Confluence: other independent (not blocked) tracked wallets that bought the same token recently.
+    confluence_window_minutes: float = Field(30.0, gt=0)
+    confluence_size_bonus: float = Field(0.25, ge=0, le=1)  # +25 % size per extra wallet...
+    confluence_max_mult: float = Field(1.5, ge=1, le=2)  # ...up to this multiple (risk caps still apply)
+    min_confluence_wallets: int = Field(0, ge=0, le=10)  # require N other wallets (0 = off)
+    # RugCheck risks that block a token (case-insensitive substring of the risk name)
+    blocked_risk_flags: list[str] = Field(
+        default_factory=lambda: [
+            "top 10 holders high ownership",
+            "single holder ownership",
+            "large amount of lp unlocked",
+            "creator history of rugged",
+        ]
+    )
+    # Before buying, quote the sale of what we would get: no route / too lossy round trip = don't buy.
+    check_sell_route: bool = True
+    max_round_trip_quote_loss_pct: float = Field(10.0, gt=0, le=50)
+    # Market regime (SOL 24 h move): size multipliers (≤ 1) and regimes where nothing is copied.
+    regime_size_multipliers: dict[str, float] = Field(default_factory=lambda: {"extreme_down": 0.5, "extreme_up": 0.75})
+    block_regimes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _regimes(self) -> FiltersSection:
+        unknown = (set(self.regime_size_multipliers) | set(self.block_regimes)) - KNOWN_REGIMES
+        if unknown:
+            raise ValueError(f"unknown regimes {sorted(unknown)}; valid: {sorted(KNOWN_REGIMES)}")
+        if any(not 0 <= v <= 1 for v in self.regime_size_multipliers.values()):
+            raise ValueError("regime_size_multipliers must be between 0 and 1 (they can only reduce size)")
+        return self
+
+
 class LearningSection(Section):
     """Learning from our own copies (scoring/feedback.py)."""
 
@@ -574,6 +613,7 @@ class AppConfig(Section):
     backtest: BacktestSection = BacktestSection()
     measurement: MeasurementSection = MeasurementSection()
     learning: LearningSection = LearningSection()
+    filters: FiltersSection = FiltersSection()
 
     @model_validator(mode="after")
     def _cross_section(self) -> AppConfig:

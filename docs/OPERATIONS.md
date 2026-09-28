@@ -154,6 +154,15 @@ ventanas que la configuración actual y se muestran lado a lado. Aplica un
 cambio solo si mejora de forma clara y con suficientes operaciones; una
 diferencia pequeña suele ser ruido.
 
+### Filtros por señal
+
+Además de los límites de riesgo, cada decisión aplica los filtros de
+`filters.*` ([CONFIGURATION.md](CONFIGURATION.md#filters)): valor esperado
+tras costes, confluencia de wallets, riesgos de RugCheck, ruta de venta y
+régimen de mercado. Usa *Análisis → ¿Protegen los filtros?* para comprobar con
+tus datos si cada uno protege o solo te cuesta oportunidades antes de
+cambiarlo.
+
 ### Análisis de resultados
 
 La página *Análisis* responde, con tus propios datos, a:

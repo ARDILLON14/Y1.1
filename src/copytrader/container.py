@@ -157,6 +157,7 @@ class Container:
             price_at=price_at,
         )
         self.cycle.on_selection(self._on_selection)
+        self.pipeline.regime = lambda: self.cycle.current_regime
         self.recovery = OrderRecovery(
             db=self.db,
             clock=self.clock,

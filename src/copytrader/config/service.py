@@ -47,6 +47,7 @@ RUNTIME_MUTABLE_SECTIONS: frozenset[str] = frozenset(
         "backtest",
         "measurement",
         "learning",
+        "filters",
     }
 )
 # Individual keys inside mutable sections that still require a restart / YAML edit.

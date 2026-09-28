@@ -30,7 +30,7 @@ from copytrader.core.clock import Clock
 from copytrader.core.concurrency import KeyedLocks
 from copytrader.core.errors import CopyTraderError
 from copytrader.core.events import EventBus, SignalDecided
-from copytrader.core.models import CheckResult, Decision, OrderRequest, Quote, TokenInfo
+from copytrader.core.models import CheckResult, Decision, OrderRequest, Quote, SwapEvent, TokenInfo
 from copytrader.core.types import (
     LABELS_ES,
     ExitMode,
@@ -39,19 +39,29 @@ from copytrader.core.types import (
     Side,
     SignalStatus,
     TradeMode,
+    WalletStatus,
 )
 from copytrader.db.base import Database
-from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo
+from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo
 from copytrader.execution.base import quote_price_usd
 from copytrader.execution.costs import lamports_to_usd, round_trip_cost_lamports
 from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
 from copytrader.risk.engine import EntryRequest, RiskEngine
-from copytrader.signals.engine import SignalContext, SignalEngine, copyable, signal_age_limit
+from copytrader.signals.engine import SignalContext, SignalEngine, WalletInfo, copyable, signal_age_limit
 
 log = structlog.get_logger(__name__)
 _COST_LABEL = "Coste de red de ida y vuelta asumible"
+_SELL_LABEL = "Se puede vender (ruta de salida)"
+_EV_LABEL = "Valor esperado de la copia tras costes"
+REGIME_LABELS = {
+    "extreme_up": "subida extrema",
+    "extreme_down": "caída extrema",
+    "bull": "alcista",
+    "bear": "bajista",
+    "sideways": "lateral",
+}
 
 
 class Rejected(Exception):
@@ -84,6 +94,7 @@ class CopyPipeline:
         self.execution = execution
         self.tokens = tokens
         self.signals = signals
+        self.regime: Callable[[], str | None] = lambda: None  # current SOL market regime (set by the container)
         self.locks = token_locks
 
     # ------------------------------------------------------------------ entry
@@ -263,6 +274,20 @@ class CopyPipeline:
                 risk_msg,
             ),
         )
+        blocked = [
+            flag.split(":", 1)[-1]
+            for flag in token.risk_flags
+            if any(pattern.lower() in flag.lower() for pattern in cfg.filters.blocked_risk_flags)
+        ]
+        self._check(
+            checks,
+            CheckResult(
+                "risk_flags",
+                "Sin riesgos bloqueados (RugCheck)",
+                not blocked,
+                message=", ".join(blocked) if blocked else f"{len(token.risk_flags)} avisos, ninguno bloqueante",
+            ),
+        )
         is_high_risk = (token.risk_score or 0) >= cfg.risk.high_risk_score_threshold or (
             mcap is not None and mcap < cfg.risk.high_risk_max_market_cap_usd
         )
@@ -315,6 +340,7 @@ class CopyPipeline:
 
         # 8-9. risk engine (limits + sizing + reservation)
         exit_mode = info.exit_mode_override or cfg.exits.default_mode
+        size_factors = await self._confluence_and_regime(swap, info.id, checks)
         rd = await self.risk.evaluate_entry(
             EntryRequest(
                 mode=trade_mode,
@@ -323,6 +349,7 @@ class CopyPipeline:
                 wallet_score=info.score,
                 exit_mode=exit_mode,
                 is_high_risk=is_high_risk,
+                size_factors=size_factors,
             )
         )
         state["sizing"] = rd.sizing
@@ -332,9 +359,15 @@ class CopyPipeline:
         state["size"] = rd.size_usd
         try:
             # 8b. fixed network costs vs size: small trades rarely survive their own fees
-            await self._check_round_trip_cost(rd.size_usd, checks)
+            cost_pct = await self._check_round_trip_cost(rd.size_usd, checks)
+            # 8c. expected value of THIS copy: the wallet's copy edge minus this trade's extra costs
+            if cfg.filters.min_expected_value_pct is not None:
+                self._check_expected_value(info, cost_pct, cfg.filters.min_expected_value_pct, checks)
             # 5. slippage for OUR size + 10b. deviation after the delay
             quote, _ = await self._quote_and_validate(ctx, token, rd.size_usd, checks, state)
+            # 5b. can we get out? quote the sale of what we would receive (honeypot / no exit route)
+            if cfg.filters.check_sell_route:
+                await self._check_sell_route(ctx, quote, checks, state["mode"])
             # 10c. TTL right before sending (+ re-quote if the quote got old)
             ttl_age = (self.clock.now() - ctx.detected_at).total_seconds()
             self._check(
@@ -425,6 +458,81 @@ class CopyPipeline:
         )
         return SignalStatus.APPROVED if pending else SignalStatus.FAILED
 
+    async def _confluence_and_regime(
+        self, swap: SwapEvent, wallet_id: int, checks: list[CheckResult]
+    ) -> tuple[tuple[str, str, float], ...]:
+        """Independent wallets buying the same token raise conviction; a violent market lowers size."""
+        f = self._config().filters
+        factors: list[tuple[str, str, float]] = []
+        start = swap.block_time - timedelta(minutes=f.confluence_window_minutes)
+        async with self.db.session() as s:
+            buyers = await TransactionRepo(s).buyers_between(swap.token_mint, start, swap.block_time)
+        others = []
+        for wid in buyers - {wallet_id}:
+            other = self.signals.wallet_by_id(wid)
+            # Evidence only from wallets that are worth following themselves: blocked ones (wash trading,
+            # coordinated clusters…) are not independent, and wallets without a copyable edge are noise.
+            if other is None or not other.tracked or other.status is WalletStatus.BLOCKED:
+                continue
+            if other.status is WalletStatus.ACTIVE or (other.copy_edge_pct or 0.0) > 0:
+                others.append(other.label or other.address[:6])
+        n = len(others)
+        who = f": {', '.join(sorted(others)[:5])}" if others else ""
+        window = f"{f.confluence_window_minutes:g} min"
+        self._check(
+            checks,
+            CheckResult(
+                "confluence",
+                "Confluencia de wallets",
+                n >= f.min_confluence_wallets,
+                n,
+                f.min_confluence_wallets or None,
+                f"{n} wallet(s) independientes más compraron en {window}{who}",
+                critical=f.min_confluence_wallets > 0,
+            ),
+        )
+        if n:
+            mult = min(1 + f.confluence_size_bonus * n, f.confluence_max_mult)
+            if mult > 1:
+                factors.append(("confluence", f"Confluencia: {n} wallet(s) más", mult))
+
+        regime = self.regime()
+        label = REGIME_LABELS.get(regime or "", "desconocido")
+        blocked = regime is not None and regime in f.block_regimes
+        regime_mult = f.regime_size_multipliers.get(regime or "")
+        detail = f"{label} (SOL 24 h)"
+        if regime_mult is not None and regime_mult < 1:
+            detail += f" · tamaño ×{regime_mult:g}"
+            factors.append(("regime", f"Régimen de mercado: {label}", regime_mult))
+        self._check(checks, CheckResult("regime", "Régimen de mercado permitido", not blocked, message=detail))
+        return tuple(factors)
+
+    async def _check_sell_route(
+        self, ctx: SignalContext, buy: Quote, checks: list[CheckResult], mode: TradeMode
+    ) -> None:
+        """Quote selling the tokens the buy would give us: no route, or a round trip losing more than
+        ``filters.max_round_trip_quote_loss_pct`` (impact both ways), means we might not get out."""
+        cfg = self._config()
+        limit = cfg.filters.max_round_trip_quote_loss_pct
+        executor = self.execution.executor(mode)
+        slippage_bps = int(cfg.exits.exit_slippage_pct * 100)
+        try:
+            sell = await executor.quote(ctx.swap.token_mint, cfg.execution.quote_mint, buy.out_amount_raw, slippage_bps)
+        except CopyTraderError as exc:
+            self._fail(checks, CheckResult("sell_route", _SELL_LABEL, False, message=f"sin ruta de venta: {exc}"))
+        loss = (1 - sell.out_amount_raw / buy.in_amount_raw) * 100 if buy.in_amount_raw else 100.0
+        self._check(
+            checks,
+            CheckResult(
+                "sell_route",
+                _SELL_LABEL,
+                loss <= limit,
+                round(loss, 2),
+                limit,
+                f"comprar y vender ahora perdería {loss:.2f}% (máx {limit:g}%) · {sell.route_label}",
+            ),
+        )
+
     async def _probation_mode(self, wallet_id: int, checks: list[CheckResult]) -> TradeMode:
         """LIVE only once the wallet has enough closed PAPER copies with an acceptable average return."""
         learning = self._config().learning
@@ -448,7 +556,34 @@ class CopyPipeline:
         )
         return TradeMode.LIVE if graduated else TradeMode.PAPER
 
-    async def _check_round_trip_cost(self, size_usd: float, checks: list[CheckResult]) -> None:
+    def _check_expected_value(
+        self, info: WalletInfo, cost_pct: float, minimum: float, checks: list[CheckResult]
+    ) -> None:
+        """The wallet's copy edge already pays the costs of a typical-size copy; a smaller copy pays
+        proportionally more in fixed fees, which is subtracted here."""
+        if info.copy_edge_pct is None:
+            checks.append(
+                CheckResult(
+                    "expected_value", _EV_LABEL, True, message="sin estimación de copia todavía", critical=False
+                )
+            )
+            return
+        extra = max(0.0, cost_pct - (info.model_cost_pct or 0.0))
+        ev = info.copy_edge_pct - extra
+        self._check(
+            checks,
+            CheckResult(
+                "expected_value",
+                _EV_LABEL,
+                ev >= minimum,
+                round(ev, 2),
+                minimum,
+                f"{ev:+.2f}% = ventaja copiable {info.copy_edge_pct:+.2f}% − coste extra de este tamaño "
+                f"{extra:.2f}% (mínimo {minimum:+.2f}%)",
+            ),
+        )
+
+    async def _check_round_trip_cost(self, size_usd: float, checks: list[CheckResult]) -> float:
         cfg = self._config()
         limit = cfg.risk.max_round_trip_cost_pct
         sol_price = await self.tokens.sol_price()
@@ -456,7 +591,7 @@ class CopyPipeline:
             no_price = CheckResult("round_trip_cost", _COST_LABEL, False, message="precio de SOL no disponible")
             self._fail(checks, no_price)
         cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg), sol_price)
-        pct = cost_usd / size_usd * 100 if size_usd > 0 else float("inf")
+        pct: float = cost_usd / size_usd * 100 if size_usd > 0 else float("inf")
         self._check(
             checks,
             CheckResult(
@@ -468,6 +603,7 @@ class CopyPipeline:
                 f"{cost_usd:.2f} USD = {pct:.2f}% del tamaño (máx {limit:g}%)",
             ),
         )
+        return pct
 
     async def _quote_and_validate(
         self,

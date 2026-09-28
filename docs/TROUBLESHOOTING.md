@@ -123,7 +123,26 @@ operación es demasiado pequeña para ser rentable después de comisiones. Sube 
 tamaño por operación (capital, `risk.max_trade_usd`) o ajusta
 `execution.expected_priority_fee_lamports` a lo que realmente pagas.
 
+**"No cumple — Valor esperado de la copia tras costes"**
+La ventaja copiable de la wallet no cubre las comisiones de una copia de este
+tamaño. Suele pasar con tamaños pequeños (sizing reducido por volatilidad,
+exposición o régimen). No lo relajes: sube el tamaño típico o deja que la
+wallet demuestre más ventaja.
+
+**"No cumple — Se puede vender (ruta de salida)"**
+Jupiter no encuentra ruta para vender el token o venderlo al instante perdería
+más de `filters.max_round_trip_quote_loss_pct`. Es exactamente el tipo de
+token del que podrías no salir.
+
+**"No cumple — Sin riesgos bloqueados (RugCheck)"**
+El informe de RugCheck incluye un riesgo de `filters.blocked_risk_flags`. El
+detalle indica cuál.
+
 **Estoy en nivel 4-5 pero las entradas salen en PAPER**
+Además de las compuertas (abajo), la wallet puede estar en su **periodo de
+prueba** (`learning.probation_*`): la decisión muestra "en prueba: n/5".
+
+
 Alguna compuerta está cerrada; el motivo exacto aparece en *Sistema* y en el
 resumen: `levels.live_trading_enabled` en false, sin armar (tras cada
 reinicio hay que volver a armar), o el nivel efectivo es 3.

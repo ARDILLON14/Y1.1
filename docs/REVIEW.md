@@ -143,6 +143,7 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | Las cotizaciones y swaps de órdenes compartían el límite de 1 petición/s de Jupiter con la consulta de precios y podían esperar detrás de ella | Rate limit con prioridades: ejecución antes que precios en segundo plano |
 | Las wallets se puntuaban por su PnL a sus propios precios, no por lo que puede capturar quien las copia | **PnL replicado** por wallet (latencia medida, impacto de su compra y la tuya, deriva durante el retraso, slippage, comisiones): componente `copy_edge` del score y regla que pasa a OBSERVAR las wallets no replicables |
 | Un único retraso máximo de señal (20 s) para scalpers y wallets de horas | Retraso máximo por wallet según su holding mediano |
+| Cada señal se juzgaba solo con límites de riesgo, sin considerar su valor esperado, la confirmación de otras wallets, la posibilidad de vender ni el estado del mercado | **Filtros por señal**: valor esperado tras los costes de esa copia, confluencia de wallets independientes (sube el tamaño), riesgos de RugCheck bloqueantes (holders concentrados, liquidez sin bloquear…), cotización de la venta antes de comprar, y régimen de mercado (reduce el tamaño o bloquea) |
 | La selección no aprendía de lo que realmente devolvía copiar cada wallet, y una wallet recién seleccionada operaba con dinero real desde su primera señal | **Aprendizaje propio**: la ventaja copiable se corrige con las copias reales (mezcla bayesiana con la estimación) y las wallets que pierden al copiarlas pasan a OBSERVAR; **periodo de prueba** en paper por wallet antes del dinero real |
 | No se medía qué pasaba con lo rechazado ni de dónde venía el resultado | **Medición**: seguimiento del precio tras cada decisión (también las rechazadas) y página *Análisis* con la lectura de cada filtro, resultado real vs estimado por wallet, por salida, por retraso y costes; **comparación de configuraciones** en el backtest |
 
@@ -160,9 +161,10 @@ confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
    (hoy la comparación de configuraciones se hace en el backtest, y el efecto
    de los filtros se mide con el seguimiento de señales rechazadas). Requiere
    separar libros de paper por variante en posiciones, riesgo y salidas.
-2. **Filtros por señal**: valor esperado neto de costes, confluencia de wallets
-   independientes, concentración de holders, liquidez bloqueada, presión
-   compradora, simulación de venta (honeypot), régimen de mercado.
+2. **Más filtros por señal** con datos que hoy no se obtienen de forma
+   fiable: presión compradora reciente, concentración de holders calculada
+   directamente (no solo el aviso de RugCheck) y simulación completa de la
+   venta en cadena.
 3. **Ejecución**: stream de menor latencia, priority fee dinámica, Jito.
 4. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
    por caída de liquidez o por ventas de varias wallets seguidas.

@@ -41,6 +41,8 @@ class SizingInput:
     token_capacity_usd: float
     wallet_risk_capacity_usd: float  # remaining at-risk budget for the source wallet
     high_risk_capacity_usd: float
+    # Signal-level adjustments (confluence, market regime): (name, label, factor), before the caps
+    extra_factors: tuple[tuple[str, str, float], ...] = ()
 
 
 @dataclass(slots=True)
@@ -106,6 +108,9 @@ def compute_size(inp: SizingInput, cfg: SizingSection) -> SizingResult:
     if inp.same_category_positions > 0:
         corr = 1 / (1 + cfg.correlation_penalty * inp.same_category_positions)
         size = step("correlation", f"{inp.same_category_positions} posición(es) correlacionadas", size * corr, corr)
+
+    for name, label, factor in inp.extra_factors:
+        size = step(name, label, size * factor, factor)
 
     caps: list[tuple[str, str, float]] = [
         ("max_trade", "Máximo por operación", inp.max_trade_usd),

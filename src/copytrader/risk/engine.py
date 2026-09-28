@@ -109,6 +109,7 @@ class EntryRequest:
     wallet_score: float | None
     exit_mode: ExitMode
     is_high_risk: bool
+    size_factors: tuple[tuple[str, str, float], ...] = ()
 
 
 @dataclass(slots=True)
@@ -316,6 +317,7 @@ class RiskEngine:
                 token_capacity_usd=token_cap,
                 wallet_risk_capacity_usd=wallet_cap,
                 high_risk_capacity_usd=high_cap,
+                extra_factors=req.size_factors,
             ),
             cfg.sizing,
         )
