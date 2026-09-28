@@ -28,11 +28,19 @@ from copytrader.core.models import Flag, SwapEvent
 from copytrader.core.types import ListType, Side, WalletStatus
 from copytrader.db.base import Database
 from copytrader.db.models import SelectionSnapshot, WalletScore
-from copytrader.db.repositories import AnalyticsRepo, ExecutionRepo, TokenRepo, TransactionRepo, WalletRepo
+from copytrader.db.repositories import (
+    AnalyticsRepo,
+    ExecutionRepo,
+    PositionRepo,
+    TokenRepo,
+    TransactionRepo,
+    WalletRepo,
+)
 from copytrader.detection.detector import SuspicionDetector
 from copytrader.detection.rules import CoordinationIndex, DetectionContext
 from copytrader.observability import metrics as prom
 from copytrader.providers.interfaces import SolPriceHistory, TokenInfoProvider
+from copytrader.scoring.feedback import apply_feedback, realized_stats
 from copytrader.scoring.scorer import ScoreResult, ScoringEngine
 from copytrader.scoring.status import StatusDecision, decide_status
 from copytrader.selection.selector import Candidate, SelectionResult, select_wallets
@@ -195,6 +203,17 @@ class EvaluationCycle:
                         replication=replication,
                     )
 
+        # Learn from our own copies: blend the copy estimate with what copying really returned.
+        async with self.db.session() as s:
+            realized = await PositionRepo(s).closed_returns_by_wallet(
+                now - timedelta(days=cfg.learning.feedback_window_days)
+            )
+        for w in wallets:
+            copies = realized_stats(realized.get(w.id, ()), cfg.scoring.sample.confidence_z)
+            a = analyses[w.id]
+            for m in (a.all, a.decayed, a.recent):
+                apply_feedback(m, copies, cfg.learning.feedback_prior_positions)
+
         coordination = CoordinationIndex(
             (
                 (a.address, sw.token_mint, sw.block_time)
@@ -220,7 +239,12 @@ class EvaluationCycle:
             score = self.scorer.score(analysis, flags)
             list_type = ListType(w.list_type)
             status = decide_status(
-                list_type=list_type, score=score.score, metrics=analysis.all, flags=flags, rules=cfg.status_rules
+                list_type=list_type,
+                score=score.score,
+                metrics=analysis.all,
+                flags=flags,
+                rules=cfg.status_rules,
+                learning=cfg.learning,
             )
             evaluations.append(
                 WalletEvaluation(w.id, w.address, w.label, list_type, analysis, flags, score, status, w.status)

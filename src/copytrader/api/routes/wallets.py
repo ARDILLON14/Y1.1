@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -12,7 +13,7 @@ from copytrader.api import serializers as ser
 from copytrader.api.auth import Session
 from copytrader.api.deps import client_ip, ctx, session, write_session
 from copytrader.collector.wallet_collector import parse_list_type
-from copytrader.core.types import ExitMode, ListType
+from copytrader.core.types import ExitMode, ListType, TradeMode
 from copytrader.db.repositories import AnalyticsRepo, AuditRepo, PositionRepo, TransactionRepo, WalletRepo
 from copytrader.signals.engine import signal_age_limit
 
@@ -110,6 +111,10 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
         txs = await TransactionRepo(s).recent_for_wallet(w.id, 50)
         n_tx = await TransactionRepo(s).count_for_wallet(w.id)
         positions = await PositionRepo(s).list(source_wallet_id=w.id, limit=50)
+        learning = c.cfg.learning
+        paper = await PositionRepo(s).closed_returns_by_wallet(
+            c.clock.now() - timedelta(days=learning.feedback_window_days), mode=TradeMode.PAPER, wallet_id=w.id
+        )
     return {
         "wallet": ser.wallet(w, m_all),
         "metrics": {
@@ -140,6 +145,22 @@ async def wallet_detail(address: str, request: Request, _: Session = Depends(ses
         "n_transactions": n_tx,
         "positions": [ser.position(p) for p in positions],
         "signal_age_limit": _signal_age(c.cfg, m_all.data if m_all else None),
+        "probation": _probation(learning, paper.get(w.id, ())),
+    }
+
+
+def _probation(learning: Any, returns: Any) -> dict[str, Any]:
+    n = len(returns)
+    mean_pct = 100 * sum(returns) / n if n else None
+    return {
+        "enabled": learning.probation_enabled,
+        "closed_paper": n,
+        "required": learning.probation_min_positions,
+        "mean_pct": mean_pct,
+        "min_return_pct": learning.probation_min_return_pct,
+        "graduated": n >= learning.probation_min_positions
+        and mean_pct is not None
+        and mean_pct >= learning.probation_min_return_pct,
     }
 
 

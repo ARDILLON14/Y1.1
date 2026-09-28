@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any, NoReturn
 
 import structlog
@@ -167,6 +168,11 @@ class CopyPipeline:
                 f"{info.score or 0:.1f} ≥ {min_score:.0f}",
             ),
         )
+
+        # 1b. probation: real money only for wallets that already proved themselves in paper
+        if trade_mode is TradeMode.LIVE and cfg.learning.probation_enabled:
+            trade_mode = await self._probation_mode(info.id, checks)
+            state["mode"] = trade_mode
 
         # 10a. delay (cheap check first), adapted to how long this wallet holds its trades
         age = (now - swap.block_time).total_seconds()
@@ -418,6 +424,29 @@ class CopyPipeline:
             )
         )
         return SignalStatus.APPROVED if pending else SignalStatus.FAILED
+
+    async def _probation_mode(self, wallet_id: int, checks: list[CheckResult]) -> TradeMode:
+        """LIVE only once the wallet has enough closed PAPER copies with an acceptable average return."""
+        learning = self._config().learning
+        since = self.clock.now() - timedelta(days=learning.feedback_window_days)
+        async with self.db.session() as s:
+            by_wallet = await PositionRepo(s).closed_returns_by_wallet(since, mode=TradeMode.PAPER, wallet_id=wallet_id)
+        returns = by_wallet.get(wallet_id, ())
+        n, need = len(returns), learning.probation_min_positions
+        mean_pct = 100 * sum(returns) / n if n else None
+        graduated = n >= need and mean_pct is not None and mean_pct >= learning.probation_min_return_pct
+        avg = "sin datos" if mean_pct is None else f"media {mean_pct:+.1f}%"
+        message = (
+            f"superado: {n} copias paper cerradas, {avg} → dinero REAL"
+            if graduated
+            else f"en prueba: {n}/{need} copias paper cerradas ({avg}, mínimo "
+            f"{learning.probation_min_return_pct:+.1f}%) → se ejecuta en PAPER"
+        )
+        self._check(
+            checks,
+            CheckResult("probation", "Periodo de prueba en paper", graduated, n, need, message, critical=False),
+        )
+        return TradeMode.LIVE if graduated else TradeMode.PAPER
 
     async def _check_round_trip_cost(self, size_usd: float, checks: list[CheckResult]) -> None:
         cfg = self._config()

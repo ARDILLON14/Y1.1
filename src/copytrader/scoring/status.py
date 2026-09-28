@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from copytrader.analysis.metrics import WalletMetrics
-from copytrader.config.models import StatusRulesSection
+from copytrader.config.models import LearningSection, StatusRulesSection
 from copytrader.core.models import Flag
 from copytrader.core.types import ListType, Severity, WalletStatus
 
@@ -17,7 +17,13 @@ class StatusDecision:
 
 
 def decide_status(
-    *, list_type: ListType, score: float, metrics: WalletMetrics, flags: list[Flag], rules: StatusRulesSection
+    *,
+    list_type: ListType,
+    score: float,
+    metrics: WalletMetrics,
+    flags: list[Flag],
+    rules: StatusRulesSection,
+    learning: LearningSection | None = None,
 ) -> StatusDecision:
     if list_type is ListType.BLACKLIST:
         return StatusDecision(WalletStatus.BLOCKED, ["En blacklist manual: nunca se copiará"])
@@ -41,13 +47,29 @@ def decide_status(
     if rules.observe_on_degradation:
         observe.extend(f"[{f.code}] {f.message}" for f in flags if f.code == "DEGRADATION")
     floor = rules.min_copy_expectancy_pct
-    copied = metrics.copy_expectancy_pct
-    if floor is not None and copied is not None and metrics.copy_n >= rules.min_trades_active and copied < floor:
-        latency = metrics.replication.get("latency_seconds")
+    real_n = metrics.realized_copy_n
+    real_ub = metrics.realized_copy_ub_pct
+    if learning is not None and real_n >= learning.losing_min_positions and real_ub is not None and real_ub < 0:
         observe.append(
-            f"Ventaja no replicable: copiarla rendiría {copied:+.1f}% por operación "
-            f"(latencia ~{latency}s, tu tamaño y costes; mínimo {floor:+.1f}%)"
+            f"Copiarla pierde en la práctica: {real_n} copias cerradas, retorno medio "
+            f"{metrics.realized_copy_mean_pct or 0:+.1f}% (incluso el escenario optimista es {real_ub:+.1f}%)"
         )
+    elif floor is not None and metrics.effective_copy_expectancy_pct is not None and real_n > 0:
+        effective = metrics.effective_copy_expectancy_pct
+        if effective < floor and metrics.copy_n + real_n >= rules.min_trades_active:
+            observe.append(
+                f"Ventaja copiable insuficiente: {effective:+.1f}% por operación combinando la estimación "
+                f"({metrics.copy_expectancy_pct or 0:+.1f}%) y tus {real_n} copias reales "
+                f"({metrics.realized_copy_mean_pct or 0:+.1f}%); mínimo {floor:+.1f}%"
+            )
+    elif floor is not None and metrics.copy_expectancy_pct is not None:
+        copied = metrics.copy_expectancy_pct
+        if metrics.copy_n >= rules.min_trades_active and copied < floor:
+            latency = metrics.replication.get("latency_seconds")
+            observe.append(
+                f"Ventaja no replicable: copiarla rendiría {copied:+.1f}% por operación "
+                f"(latencia ~{latency}s, tu tamaño y costes; mínimo {floor:+.1f}%)"
+            )
     if list_type is ListType.WATCHLIST:
         observe.append("En watchlist: solo alertas, sin copia automática")
     if observe:

@@ -353,3 +353,12 @@ measurement:                          # [en caliente]  medición de decisiones (
   outcome_horizons_minutes: [5, 60, 1440]
   outcome_interval_seconds: 60
   max_sample_lateness_fraction: 0.25   # si se mide demasiado tarde (app parada), se marca como no medido
+
+learning:                             # [en caliente]  aprender de tus propias copias
+  feedback_prior_positions: 10         # la estimación del modelo "vale" como 10 copias reales; con más copias
+                                       # manda el resultado real (ventaja copiable efectiva)
+  feedback_window_days: 90
+  losing_min_positions: 10             # OBSERVAR si con ≥ 10 copias cerradas copiarla pierde claramente
+  probation_enabled: true              # con trading real, cada wallet se copia primero en PAPER...
+  probation_min_positions: 5           # ...hasta tener 5 copias paper cerradas...
+  probation_min_return_pct: 0.0        # ...con un retorno medio de al menos este %

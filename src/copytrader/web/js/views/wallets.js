@@ -34,11 +34,15 @@ export async function render(root) {
       { label: "ROI", num: true, render: (w) => pct(w.metrics?.roi_pct, 1, true) },
       { label: "Win rate", num: true, render: (w) => frac(w.metrics?.win_rate) },
       { label: "PF", num: true, render: (w) => num(w.metrics?.profit_factor, 2) },
-      { label: "Copia est./op", num: true, render: (w) => h("span", {
-        class: signClass(w.metrics?.copy_expectancy_pct),
-        title: "Retorno medio estimado por operación si la copias (tu latencia, tamaño y costes). Su retorno: "
-          + pct(w.metrics?.expectancy_pct, 2, true),
-      }, pct(w.metrics?.copy_expectancy_pct, 2, true)) },
+      { label: "Copia est./op", num: true, render: (w) => {
+        const m = w.metrics || {};
+        const v = m.effective_copy_expectancy_pct ?? m.copy_expectancy_pct;
+        const real = m.realized_copy_n ? ` Corregido con ${m.realized_copy_n} copias reales (estimación inicial ${pct(m.copy_expectancy_pct, 2, true)}).` : "";
+        return h("span", {
+          class: signClass(v),
+          title: `Retorno medio por operación si la copias (tu latencia, tamaño y costes). Su retorno: ${pct(m.expectancy_pct, 2, true)}.${real}`,
+        }, pct(v, 2, true), m.realized_copy_n ? " ✓" : "");
+      } },
       { label: "Drawdown", num: true, render: (w) => pct(w.metrics?.max_drawdown_pct, 1) },
       { label: "Ops", num: true, render: (w) => w.metrics?.n_trades ?? "—" },
       { label: "Última actividad", render: (w) => h("span", { class: "nowrap" }, ago(w.last_activity_at)) },

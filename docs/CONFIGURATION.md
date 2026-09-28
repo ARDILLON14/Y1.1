@@ -32,7 +32,7 @@ copytrader check-config
 
 | En caliente (dashboard) | Solo editando el YAML y reiniciando |
 |---|---|
-| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest`, `measurement` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
+| `wallets`, `analysis`, `scoring`, `status_rules`, `detection`, `selection`, `signals`, `risk`, `sizing`, `latency`, `exits`, `execution`, `paper`, `levels`, `notifications`, `backtest`, `measurement`, `learning` | `app` (incluido el **nivel máximo**), `providers`, `api`, `observability`, `security` |
 
 Claves **bloqueadas** aunque su sección sea editable (requieren YAML + reinicio,
 a propósito, porque controlan el dinero real):
@@ -254,6 +254,24 @@ URL del firmador, ruta del keystore (solo `local`) y tolerancia de reloj HMAC.
 Ventanas de entrenamiento y test, latencia, slippage, comisiones y coeficiente
 de impacto de mercado usados en la simulación. `fee_usd_per_trade: null` usa el
 mismo modelo de costes de red que el paper trading.
+
+### `learning`
+Aprender de tus propias copias:
+
+- **Ventaja copiable efectiva**: la estimación del modelo de copia se corrige
+  con lo que realmente devuelven tus copias cerradas (paper y real, netas de
+  comisiones): `(k · estimación + n · real) / (k + n)`, con
+  `k = feedback_prior_positions`. Con pocas copias manda la estimación; con
+  muchas, la realidad. El score (`copy_edge`) y la regla
+  `status_rules.min_copy_expectancy_pct` usan este valor.
+- **Copiarla pierde en la práctica**: con al menos `losing_min_positions`
+  copias cerradas en `feedback_window_days` y un escenario optimista (límite
+  superior de su media) negativo, la wallet pasa a OBSERVAR.
+- **Periodo de prueba** (`probation_*`): con el trading real activo, una wallet
+  se copia en **paper** hasta tener `probation_min_positions` copias paper
+  cerradas con un retorno medio ≥ `probation_min_return_pct`. Solo entonces
+  sus señales usan dinero real. También aplica a la whitelist. La decisión
+  muestra el estado ("en prueba: 2/5…" o "superado").
 
 ### `measurement`
 Seguimiento de lo que hizo el precio después de cada decisión de copia,

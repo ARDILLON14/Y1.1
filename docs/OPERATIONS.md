@@ -253,7 +253,13 @@ Tres compuertas independientes, todas necesarias:
    sistema vuelve desarmado y opera en paper hasta que lo armes otra vez.
 
 Empieza en **nivel 4** (topes de `levels.level4`: 20 USD por operación, 3
-posiciones, 2 % de pérdida diaria por defecto) al menos 1-2 semanas. Compara
+posiciones, 2 % de pérdida diaria por defecto) al menos 1-2 semanas.
+
+**Periodo de prueba por wallet**: aunque el trading real esté armado, cada
+wallet se sigue copiando en paper hasta tener 5 copias paper cerradas con
+resultado medio no negativo (`learning.probation_*`). Así una wallet recién
+seleccionada nunca estrena con tu dinero. El detalle de la wallet y cada
+decisión indican si está "en prueba" o "superado". Compara
 las ejecuciones reales con lo que predijo el paper trading. Solo entonces
 considera el nivel 5 (`app.operating_level: 5`, reinicio, *Sistema → Nivel 5*).
 
@@ -297,6 +303,8 @@ o activar un kill switch.
   relajar límites.
 - *Análisis*: filtros marcados "Revisar" con muestra suficiente, wallets cuyo
   resultado real queda muy por debajo del estimado, y qué parte del resultado
-  se va en comisiones.
+  se va en comisiones. Las wallets que pierden al copiarlas pasan solas a
+  OBSERVAR ("Copiarla pierde en la práctica"); revisa si fue mala suerte o un
+  cambio real antes de volver a incluirlas.
 - Slippage real frente al configurado.
 - Que el resultado no dependa de 1-2 operaciones.

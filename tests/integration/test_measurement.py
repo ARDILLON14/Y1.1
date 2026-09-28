@@ -101,3 +101,91 @@ async def test_attribution_report_explains_where_the_result_comes_from(container
     assert costs["positions"] == 1 and costs["fees_usd"] > 0
     assert costs["gross_pnl_usd"] == pytest.approx(costs["net_pnl_usd"] + costs["fees_usd"])
     assert costs["entries_measured"] == 1 and costs["entry_late_pct"] is not None
+
+
+async def test_evaluation_learns_from_real_copies(container):
+    from copytrader.db.models import Position
+    from copytrader.db.repositories import AnalyticsRepo
+
+    c = container
+    wallet = await _selected_wallet(c)
+    now = c.clock.now()
+    async with c.db.session() as s:
+        for i in range(12):  # copying this wallet has consistently lost ~5 % per position
+            s.add(
+                Position(
+                    mode="paper",
+                    token_mint=f"LOSS{i}",
+                    decimals=6,
+                    source_wallet_id=wallet.id,
+                    exit_mode="protected",
+                    status="closed",
+                    qty_raw=0,
+                    initial_qty_raw=10**6,
+                    cost_usd=0,
+                    initial_cost_usd=40,
+                    entry_price_usd=1,
+                    peak_price_usd=1,
+                    realized_pnl_usd=-2.0 - 0.1 * (i % 3),
+                    opened_at=now - timedelta(hours=i + 2),
+                    closed_at=now - timedelta(hours=i + 1),
+                )
+            )
+    await c.cycle.run()
+    async with c.db.session() as s:
+        w = await WalletRepo(s).get(wallet.id)
+        m = (await AnalyticsRepo(s).latest_metrics(wallet.id, "all")).data
+    assert m["realized_copy_n"] == 12 and m["realized_copy_mean_pct"] < 0
+    assert m["effective_copy_expectancy_pct"] < m["copy_expectancy_pct"]
+    assert w.status == "observe" and not w.selected
+    assert any("pierde en la práctica" in r for r in w.status_reasons)
+
+
+async def test_live_money_only_after_a_paper_probation(container, monkeypatch):
+    from copytrader.core.types import TradeMode
+    from copytrader.db.models import Position
+    from copytrader.execution.mode import ModeController
+
+    c = container
+    monkeypatch.setattr(ModeController, "trade_mode", property(lambda self: TradeMode.LIVE))  # "armed" live level
+    c.signals.start()
+    wallet = await _selected_wallet(c)
+    mint = good_token(c)
+
+    await c.signals.on_swap(live_swap(c, wallet.address, mint, Side.BUY, 500.0, sig="p1"))
+    await c.signals.drain()
+    async with c.db.session() as s:
+        sig = (await s.execute(select(Signal).where(Signal.source_signature == "p1"))).scalar_one()
+    probation = next(ch for ch in sig.decision["checks"] if ch["name"] == "probation")
+    assert sig.status == SignalStatus.EXECUTED.value and sig.mode == "paper"  # copied, but in PAPER
+    assert not probation["passed"] and "en prueba: 0/5" in probation["message"]
+
+    now = c.clock.now()
+    async with c.db.session() as s:
+        for i in range(5):  # five closed paper copies with a positive average
+            s.add(
+                Position(
+                    mode="paper",
+                    token_mint=f"WIN{i}",
+                    decimals=6,
+                    source_wallet_id=wallet.id,
+                    exit_mode="protected",
+                    status="closed",
+                    qty_raw=0,
+                    initial_qty_raw=10**6,
+                    cost_usd=0,
+                    initial_cost_usd=40,
+                    entry_price_usd=1,
+                    peak_price_usd=1,
+                    realized_pnl_usd=3.0,
+                    opened_at=now - timedelta(hours=i + 2),
+                    closed_at=now - timedelta(hours=i + 1),
+                )
+            )
+    await c.signals.on_swap(live_swap(c, wallet.address, good_token(c), Side.BUY, 500.0, sig="p2"))
+    await c.signals.drain()
+    async with c.db.session() as s:
+        sig = (await s.execute(select(Signal).where(Signal.source_signature == "p2"))).scalar_one()
+    probation = next(ch for ch in sig.decision["checks"] if ch["name"] == "probation")
+    assert probation["passed"] and "superado: 5 copias" in probation["message"]
+    assert sig.mode == "live"  # graduated: this entry goes to the live book

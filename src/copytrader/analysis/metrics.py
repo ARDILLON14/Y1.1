@@ -87,6 +87,12 @@ class WalletMetrics:
     copy_profit_factor: float | None = None
     copy_cost_pct: float | None = None
     replication: dict[str, Any] = field(default_factory=dict)
+    # What copying it REALLY returned (closed copied positions) and the blend with the estimate
+    realized_copy_n: int = 0
+    realized_copy_mean_pct: float | None = None
+    realized_copy_ub_pct: float | None = None
+    effective_copy_expectancy_pct: float | None = None
+    effective_copy_expectancy_lb_pct: float | None = None
     period_pnl: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     by_token: list[dict[str, Any]] = field(default_factory=list)
     by_category: dict[str, dict[str, Any]] = field(default_factory=dict)

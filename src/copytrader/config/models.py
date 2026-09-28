@@ -504,6 +504,23 @@ class SecuritySection(Section):
     hmac_max_skew_seconds: float = Field(30.0, gt=0, le=300)
 
 
+class LearningSection(Section):
+    """Learning from our own copies (scoring/feedback.py)."""
+
+    # The copy estimate counts as this many real copies: with fewer real copies the model
+    # dominates, with many the real result does. 0 = ignore the model once there is data.
+    feedback_prior_positions: float = Field(10.0, ge=0)
+    feedback_window_days: int = Field(90, ge=1)
+    # OBSERVE a wallet when copying it clearly loses: at least this many closed copies and
+    # even the optimistic bound of their mean return is negative.
+    losing_min_positions: int = Field(10, ge=3)
+    # With live trading, a wallet is first copied in PAPER until it has this many closed paper
+    # copies with an average return of at least probation_min_return_pct.
+    probation_enabled: bool = True
+    probation_min_positions: int = Field(5, ge=1)
+    probation_min_return_pct: float = 0.0
+
+
 class MeasurementSection(Section):
     # Follow what the token did after every COPY decision, executed or rejected.
     track_outcomes: bool = True
@@ -556,6 +573,7 @@ class AppConfig(Section):
     security: SecuritySection = SecuritySection()
     backtest: BacktestSection = BacktestSection()
     measurement: MeasurementSection = MeasurementSection()
+    learning: LearningSection = LearningSection()
 
     @model_validator(mode="after")
     def _cross_section(self) -> AppConfig:

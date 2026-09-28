@@ -58,6 +58,8 @@ def wallet(w: Wallet, metrics: WalletMetric | None = None) -> dict[str, Any]:
             "median_holding_minutes": d.get("median_holding_minutes"),
             "expectancy_pct": d.get("expectancy_pct"),
             "copy_expectancy_pct": d.get("copy_expectancy_pct"),
+            "effective_copy_expectancy_pct": d.get("effective_copy_expectancy_pct"),
+            "realized_copy_n": d.get("realized_copy_n"),
             "copy_n": d.get("copy_n"),
         }
         if metrics

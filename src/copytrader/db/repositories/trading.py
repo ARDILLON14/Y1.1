@@ -247,6 +247,25 @@ class PositionRepo:
             stmt = stmt.where(Position.mode == mode)
         return (await self.s.execute(stmt)).scalars().all()
 
+    async def closed_returns_by_wallet(
+        self, since: datetime, *, mode: TradeMode | None = None, wallet_id: int | None = None
+    ) -> dict[int, Sequence[float]]:
+        """Net realized return of every closed copied position, grouped by source wallet."""
+        stmt = select(Position.source_wallet_id, Position.realized_pnl_usd, Position.initial_cost_usd).where(
+            Position.status == PositionStatus.CLOSED.value,
+            Position.closed_at >= since,
+            Position.source_wallet_id.is_not(None),
+        )
+        if mode is not None:
+            stmt = stmt.where(Position.mode == mode.value)
+        if wallet_id is not None:
+            stmt = stmt.where(Position.source_wallet_id == wallet_id)
+        out: dict[int, Sequence[float]] = {}
+        for wid, pnl, cost in (await self.s.execute(stmt.order_by(Position.closed_at))).all():
+            if wid is not None and cost:
+                out[int(wid)] = (*out.get(int(wid), ()), float(pnl) / float(cost))
+        return out
+
     async def realized_pnl_total(self, mode: TradeMode) -> float:
         stmt = select(func.coalesce(func.sum(Position.realized_pnl_usd), 0.0)).where(Position.mode == mode.value)
         return float((await self.s.execute(stmt)).scalar_one())

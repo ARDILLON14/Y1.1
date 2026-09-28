@@ -42,7 +42,7 @@ COMPONENT_LABELS = {
     "concentration": "Diversificación del beneficio",
     "extreme_moves": "Mercado extremo",
     "replicability": "Replicabilidad",
-    "copy_edge": "Ventaja copiable (estimada)",
+    "copy_edge": "Ventaja copiable",
 }
 
 
@@ -131,8 +131,15 @@ def compute_components(m: WalletMetrics, b: ScoringBounds, k: float) -> dict[str
         comps["extreme_moves"] = (None, {"n": (ext or {}).get("n", 0)})
     comps["replicability"] = (m.replicable_frac, {"replicable_frac": m.replicable_frac})
     # What copying the wallet would return with our latency, size and costs (lower bound + mean).
-    copy_lb = norm01(m.copy_expectancy_lb_pct, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
-    copy_mean = norm01(m.copy_expectancy_pct, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
+    # Once we have copied the wallet, the estimate is blended with the real result (scoring/feedback.py).
+    mean = m.effective_copy_expectancy_pct if m.effective_copy_expectancy_pct is not None else m.copy_expectancy_pct
+    low = (
+        m.effective_copy_expectancy_lb_pct
+        if m.effective_copy_expectancy_lb_pct is not None
+        else (m.copy_expectancy_lb_pct)
+    )
+    copy_lb = norm01(low, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
+    copy_mean = norm01(mean, b.copy_expectancy_lo_pct, b.copy_expectancy_hi_pct)
     comps["copy_edge"] = (
         None if copy_lb is None or copy_mean is None else 0.5 * copy_lb + 0.5 * copy_mean,
         {
@@ -140,6 +147,9 @@ def compute_components(m: WalletMetrics, b: ScoringBounds, k: float) -> dict[str
             "copy_expectancy_lb_pct": m.copy_expectancy_lb_pct,
             "copy_cost_pct": m.copy_cost_pct,
             "n": m.copy_n,
+            "realized_copy_n": m.realized_copy_n,
+            "realized_copy_mean_pct": m.realized_copy_mean_pct,
+            "effective_copy_expectancy_pct": m.effective_copy_expectancy_pct,
         },
     )
     return comps

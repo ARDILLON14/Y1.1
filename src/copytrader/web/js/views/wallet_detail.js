@@ -11,7 +11,7 @@ export async function render(root, [address]) {
     h("p", {}, h("a", { href: "#/wallets" }, "← Wallets")),
     header(w, rerender),
     h("div", { class: "grid cols-2 section" }, scoreCard(d.score, w), historyCard(d.score_history)),
-    copyCard(all, d.signal_age_limit),
+    copyCard(all, d.signal_age_limit, d.probation),
     flagsCard(d.flags),
     metricsCard(d.metrics),
     h("div", { class: "grid cols-2 section" }, dailyCard(all), breakdownCard(all)),
@@ -87,7 +87,15 @@ function scoreCard(score, w) {
 
 const LATENCY_SOURCE = { measured: "medida en tus copias", config: "configurada", default: "por defecto, aún sin copias medidas", backtest: "backtest" };
 
-function copyCard(m, ageLimit) {
+function probationText(p) {
+  if (!p || !p.enabled) return "desactivado";
+  const avg = p.mean_pct === null ? "sin datos" : `media ${pct(p.mean_pct, 1, true)}`;
+  return p.graduated
+    ? `superado (${p.closed_paper} copias paper, ${avg}): puede operar con dinero real`
+    : `en prueba: ${p.closed_paper}/${p.required} copias paper cerradas (${avg}); con trading real se copia en paper`;
+}
+
+function copyCard(m, ageLimit, probation) {
   const r = m.replication || {};
   const fmtHold = (min) => (min === null || min === undefined ? "—" : min < 2 ? `${num(min * 60, 0)} s` : min < 120 ? `${num(min, 0)} min` : `${num(min / 60, 1)} h`);
   return h("div", { class: "card section" },
@@ -107,7 +115,15 @@ function copyCard(m, ageLimit) {
           h("dt", {}, "Tamaño supuesto"), h("dd", {}, usd(r.size_usd)),
           h("dt", {}, "Comisiones fijas / slippage"), h("dd", {}, `${pct(r.fixed_cost_pct, 2)} ida y vuelta · ${pct(r.slippage_pct, 2)} por lado`),
           h("dt", {}, "Holding mediano de la wallet"), h("dd", {}, fmtHold(m.median_holding_minutes)),
-          h("dt", {}, "Retraso máximo de sus señales"), h("dd", {}, ageLimit ? `${num(ageLimit.seconds, 1)} s (${ageLimit.reason})` : "—")),
+          h("dt", {}, "Retraso máximo de sus señales"), h("dd", {}, ageLimit ? `${num(ageLimit.seconds, 1)} s (${ageLimit.reason})` : "—"),
+          h("dt", {}, "Copias reales cerradas"), h("dd", {}, m.realized_copy_n
+            ? `${m.realized_copy_n} · media ${pct(m.realized_copy_mean_pct, 2, true)} `
+              + (m.realized_copy_ub_pct === null || m.realized_copy_ub_pct === undefined
+                ? "(muestra aún pequeña)" : `(escenario optimista ${pct(m.realized_copy_ub_pct, 2, true)})`)
+            : "aún ninguna"),
+          h("dt", {}, "Ventaja copiable efectiva"), h("dd", {}, h("span", { class: signClass(m.effective_copy_expectancy_pct) },
+            pct(m.effective_copy_expectancy_pct, 2, true)), m.realized_copy_n ? " (estimación corregida con tus copias reales)" : " (solo estimación)"),
+          h("dt", {}, "Periodo de prueba"), h("dd", {}, probationText(probation))),
         h("p", { class: "muted small section" },
           "Estima qué habrías ganado copiando cada operación cerrada: llegas tarde, la compra de la wallet ya movió el precio, pagas tu impacto, "
           + "slippage y comisiones. Si sale negativo con muestra suficiente, la wallet pasa a OBSERVAR.")));
