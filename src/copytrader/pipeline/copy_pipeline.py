@@ -225,7 +225,7 @@ class CopyPipeline:
                 mcap is not None and cfg.risk.min_market_cap_usd <= mcap <= cfg.risk.max_market_cap_usd,
                 mcap,
                 f"{cfg.risk.min_market_cap_usd:,.0f}-{cfg.risk.max_market_cap_usd:,.0f}",
-                f"${mcap or 0:,.0f}",
+                f"${mcap or 0:,.0f} (rango ${cfg.risk.min_market_cap_usd:,.0f} – ${cfg.risk.max_market_cap_usd:,.0f})",
             ),
         )
         age_min = token.age_minutes(now)
@@ -295,7 +295,7 @@ class CopyPipeline:
                 checks,
                 CheckResult(
                     "market_move",
-                    "Precio de mercado cerca del de la wallet",
+                    "Precio de mercado cerca del pagado por la wallet",
                     move <= cfg.latency.max_price_deviation_pct,
                     round(move, 3),
                     cfg.latency.max_price_deviation_pct,
@@ -519,7 +519,8 @@ class CopyPipeline:
         reason = None
         if failed:
             f = failed[0]
-            reason = f"{f.label}: {f.message}" if f.message else f.label
+            # Labels state the requirement ("Liquidez suficiente"): make the failure explicit.
+            reason = f"No cumple — {f.label}: {f.message}" if f.message else f"No cumple — {f.label}"
         decision = Decision(
             approved=approved,
             checks=checks,

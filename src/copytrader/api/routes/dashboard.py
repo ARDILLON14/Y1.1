@@ -135,8 +135,8 @@ async def kill_switch(body: KillSwitchBody, request: Request, sess: Session = De
     if body.action == "activate":
         await c.kill.activate(body.scope, body.reason or "manual", actor=sess.username, ip=ip, flatten=body.flatten)
     else:
-        if body.scope is KillSwitchScope.GLOBAL:
-            await reauth(request, sess, body.password, body.totp)
+        # Re-opening entries (either scope) is a risk-increasing action: password required.
+        await reauth(request, sess, body.password, body.totp)
         await c.kill.deactivate(body.scope, actor=sess.username, ip=ip)
     return c.kill.snapshot()
 
@@ -227,6 +227,14 @@ async def get_config(request: Request, _: Session = Depends(session)) -> dict[st
 class ConfigPatch(BaseModel):
     patch: dict[str, Any]
     comment: str = Field("", max_length=500)
+    # Required to apply (not to preview): config changes move risk limits.
+    password: str | None = Field(None, max_length=256)
+    totp: str | None = Field(None, max_length=12)
+
+
+class Reauth(BaseModel):
+    password: str | None = Field(None, max_length=256)
+    totp: str | None = Field(None, max_length=12)
 
 
 @router.post("/config/preview")
@@ -238,6 +246,7 @@ async def preview_config(body: ConfigPatch, request: Request, _: Session = Depen
 @router.patch("/config")
 async def patch_config(body: ConfigPatch, request: Request, sess: Session = Depends(write_session)) -> dict[str, Any]:
     c = ctx(request).container
+    await reauth(request, sess, body.password, body.totp)
     await c.config_service.apply_patch(body.patch, author=sess.username, comment=body.comment)
     async with c.db.session() as s:
         await AuditRepo(s).add(
@@ -262,8 +271,11 @@ async def config_history(request: Request, _: Session = Depends(session)) -> lis
 
 
 @router.post("/config/rollback/{version}")
-async def rollback(version: int, request: Request, sess: Session = Depends(write_session)) -> dict[str, Any]:
+async def rollback(
+    version: int, body: Reauth, request: Request, sess: Session = Depends(write_session)
+) -> dict[str, Any]:
     c = ctx(request).container
+    await reauth(request, sess, body.password, body.totp)
     await c.config_service.rollback(version, author=sess.username)
     async with c.db.session() as s:
         await AuditRepo(s).add(sess.username, "config_rollback", str(version), {}, client_ip(request))

@@ -49,11 +49,13 @@ class SizingResult:
     limited_by: str
     steps: list[dict[str, Any]] = field(default_factory=list)
     rejected_reason: str | None = None
+    limited_by_label: str = "modelo de riesgo (sin topes)"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "size_usd": round(self.size_usd, 2),
             "limited_by": self.limited_by,
+            "limited_by_label": self.limited_by_label,
             "steps": self.steps,
             "rejected_reason": self.rejected_reason,
         }
@@ -122,16 +124,17 @@ def compute_size(inp: SizingInput, cfg: SizingSection) -> SizingResult:
         )
     if inp.is_high_risk:
         caps.append(("high_risk", "Exposición alto riesgo disponible", inp.high_risk_capacity_usd))
-    limited_by = "model"
+    limited_by, limited_label = "model", "modelo de riesgo (sin topes)"
     for name, label, cap in caps:
         if size > cap:
             size = step(name, label, max(0.0, cap))
-            limited_by = name
+            limited_by, limited_label = name, label.lower()
 
-    result = SizingResult(size_usd=max(0.0, size), limited_by=limited_by, steps=steps)
+    result = SizingResult(size_usd=max(0.0, size), limited_by=limited_by, steps=steps, limited_by_label=limited_label)
     if result.size_usd < inp.min_trade_usd:
         result.rejected_reason = (
-            f"Tamaño {result.size_usd:.2f} USD < mínimo útil {inp.min_trade_usd:.2f} USD (limitado por {limited_by})"
+            f"Tamaño {result.size_usd:.2f} USD < mínimo útil {inp.min_trade_usd:.2f} USD "
+            f"(limitado por: {limited_label})"
         )
     return result
 

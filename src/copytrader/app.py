@@ -13,6 +13,7 @@ import structlog
 from copytrader.container import Container
 from copytrader.core.events import ProviderStatusChanged, SystemMessage
 from copytrader.core.types import LEVEL_NAMES_ES, ListType, Severity
+from copytrader.db.instance_lock import InstanceLock
 from copytrader.db.repositories import EventLogRepo, WalletRepo
 from copytrader.observability import metrics
 
@@ -28,6 +29,7 @@ class Application:
         self._stopped = asyncio.Event()
         self._eval_now = asyncio.Event()
         self._api_server: Any = None
+        self._lock = InstanceLock(container.db)
 
     def _spawn(self, coro: Coroutine[Any, Any, Any], name: str) -> None:
         task = asyncio.get_running_loop().create_task(coro, name=name)
@@ -49,6 +51,7 @@ class Application:
         global _metrics_started
         c = self.c
         cfg = c.cfg
+        await self._lock.acquire()  # refuses to start if another instance uses this database
         if c.db.is_sqlite:
             await c.db.create_all()
         await c.config_service.load()
@@ -196,6 +199,7 @@ class Application:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self._lock.release()
         await c.aclose()
         log.info("application_stopped")
 

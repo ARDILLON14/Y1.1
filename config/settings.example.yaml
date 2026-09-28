@@ -9,7 +9,7 @@
 #  * Todo se valida al arrancar y en cada cambio en caliente. Si algo no es coherente
 #    (p. ej. pérdida diaria > semanal) el sistema no arranca y dice por qué.
 #  * Cualquier clave se puede sobrescribir con variables de entorno:
-#       COPYTRADER__SELECCION... → COPYTRADER__SELECTION__TOP_N=20
+#       selection.top_n  →  COPYTRADER__SELECTION__TOP_N=20
 #  * Las secciones marcadas [en caliente] se pueden cambiar desde el dashboard
 #    (Configuración) sin reiniciar; los cambios quedan versionados.
 # =============================================================================
@@ -267,9 +267,9 @@ paper:                                # [en caliente]  paper trading
   network_fee_sol: 0.000105
   use_real_quotes: true
 
-levels:                               # [en caliente, salvo live_trading_enabled]
+levels:                               # [en caliente, salvo las claves bloqueadas]
   live_trading_enabled: false          # [bloqueada] 2ª compuerta para dinero real
-  require_arm: true                    # 3ª compuerta: armar desde el dashboard tras el preflight
+  require_arm: true                    # [bloqueada] 3ª compuerta: armar desde el dashboard tras el preflight
   preflight_min_paper_days: 7
   level4:                              # topes del nivel 4 (se aplica el mínimo con risk.*)
     max_trade_usd: 20

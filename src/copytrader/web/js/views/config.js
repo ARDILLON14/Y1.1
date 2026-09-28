@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, dt, toast } from "../dom.js";
+import { h, table, dt, toast, askPassword } from "../dom.js";
 
 let section = "risk";
 
@@ -32,7 +32,9 @@ export async function render(root) {
       if (!Object.keys(patch).length) { toast("Sin cambios"); return; }
       try {
         await api.post("/config/preview", { patch });
-        const r = await api.patch("/config", { patch, comment: comment.value });
+        const cred = await askPassword("Confirmar cambio de configuración", "Los cambios afectan a límites de riesgo y se aplican al instante. Confirma con tu contraseña.");
+        if (!cred) return;
+        const r = await api.patch("/config", { patch, comment: comment.value, ...cred });
         toast(`Configuración guardada (v${r.version}). Se aplica inmediatamente.`);
         render(root);
       } catch (ex) { toast(ex.message, true); }
@@ -56,8 +58,9 @@ export async function render(root) {
       { label: "Autor", render: (v) => v.author },
       { label: "Comentario", wrap: true, render: (v) => v.comment || "—" },
       { label: "", render: (v) => h("button", { type: "button", onclick: async () => {
-        if (!confirm(`¿Volver a la versión ${v.version}?`)) return;
-        try { await api.post(`/config/rollback/${v.version}`); toast("Rollback aplicado"); render(root); } catch (ex) { toast(ex.message, true); }
+        const cred = await askPassword(`Volver a la versión ${v.version}`, "La configuración de esa versión se aplicará al instante.");
+        if (!cred) return;
+        try { await api.post(`/config/rollback/${v.version}`, cred); toast("Rollback aplicado"); render(root); } catch (ex) { toast(ex.message, true); }
       } }, "Restaurar") },
     ], history, { empty: "Sin cambios en caliente todavía" })));
 }

@@ -248,6 +248,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .modal { width: min(760px, 100%); background: var(--surface); border-radius: 12px; padding: 20px; border: 1px solid var(--border); }
 .modal.narrow { width: min(400px, 100%); }
+.modal > .card-head { flex-wrap: nowrap; align-items: flex-start; }
+.modal > .card-head h2 { flex: 1; min-width: 0; }
 pre.explain {
   background: var(--surface-2); border-radius: 8px; padding: 12px; overflow-x: auto;
   font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; margin: 0;

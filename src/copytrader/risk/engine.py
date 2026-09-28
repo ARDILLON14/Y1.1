@@ -328,7 +328,7 @@ class RiskEngine:
                 sizing.rejected_reason is None,
                 round(size, 2),
                 lim.min_trade_usd,
-                sizing.rejected_reason or f"{size:.2f} USD (limitado por {sizing.limited_by})",
+                sizing.rejected_reason or f"{size:.2f} USD (limitado por: {sizing.limited_by_label})",
             )
         )
         checks.append(

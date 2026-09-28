@@ -13,8 +13,8 @@ export async function render(root) {
   const scope = h("select", {}, h("option", { value: "global" }, "Global"), h("option", { value: "daily" }, "Diario"));
   const act = async (action, sc) => {
     let body = { action, scope: sc, reason: reason.value, flatten: flatten.checked };
-    if (action === "deactivate" && sc === "global") {
-      const cred = await askPassword("Desactivar kill switch global", "Volverán a abrirse posiciones automáticamente. Confirma con tu contraseña.");
+    if (action === "deactivate") {
+      const cred = await askPassword(`Desactivar kill switch ${sc === "global" ? "global" : "diario"}`, "Volverán a abrirse posiciones automáticamente. Confirma con tu contraseña.");
       if (!cred) return;
       body = { ...body, ...cred };
     }

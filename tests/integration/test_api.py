@@ -61,7 +61,7 @@ async def test_bruteforce_lockout(client):
 async def test_csrf_required_for_mutations(client):
     cl, _ = client
     csrf = await _login(cl)
-    body = {"patch": {"selection": {"top_n": 5}}}
+    body = {"patch": {"selection": {"top_n": 5}}, "password": PASSWORD}
     assert (await cl.patch("/api/config", json=body)).status_code == 403
     r = await cl.patch("/api/config", json=body, headers={"X-CSRF-Token": csrf})
     assert r.status_code == 200
@@ -72,13 +72,23 @@ async def test_invalid_or_locked_config_is_rejected(client):
     cl, c = client
     csrf = await _login(cl)
     h = {"X-CSRF-Token": csrf}
-    r = await cl.patch("/api/config", json={"patch": {"risk": {"max_trade_usd": 999_999}}}, headers=h)
+    # Loosening risk limits with a hijacked session is not enough: the password is required.
+    r = await cl.patch("/api/config", json={"patch": {"risk": {"max_trade_usd": 200}}}, headers=h)
+    assert r.status_code == 403
+    pw = {"password": PASSWORD}
+    r = await cl.patch("/api/config", json={"patch": {"risk": {"max_trade_usd": 999_999}}, **pw}, headers=h)
     assert r.status_code == 400
-    r = await cl.patch("/api/config", json={"patch": {"app": {"operating_level": 5}}}, headers=h)
+    r = await cl.patch("/api/config", json={"patch": {"app": {"operating_level": 5}}, **pw}, headers=h)
     assert r.status_code == 400
-    r = await cl.patch("/api/config", json={"patch": {"levels": {"live_trading_enabled": True}}}, headers=h)
+    r = await cl.patch("/api/config", json={"patch": {"levels": {"live_trading_enabled": True}}, **pw}, headers=h)
     assert r.status_code == 400
-    assert c.cfg.risk.max_trade_usd == 100
+    r = await cl.patch("/api/config", json={"patch": {"levels": {"require_arm": False}}, **pw}, headers=h)
+    assert r.status_code == 400
+    assert c.cfg.risk.max_trade_usd == 100 and c.cfg.levels.require_arm
+    # Rollback also requires the password.
+    r = await cl.patch("/api/config", json={"patch": {"selection": {"top_n": 7}}, **pw}, headers=h)
+    assert r.status_code == 200
+    assert (await cl.post("/api/config/rollback/0", json={}, headers=h)).status_code == 403
 
 
 async def test_sensitive_actions_require_password(client):
