@@ -168,3 +168,19 @@ async def test_analytics_endpoint(client):
     body = r.json()
     assert {"filters", "wallets", "exits", "delay", "costs", "horizons"} <= set(body)
     assert (await cl.get("/api/analytics?mode=futures")).status_code == 422
+
+
+async def test_speed_endpoint(client):
+    cl, c = client
+    assert (await cl.get("/api/system/speed")).status_code == 401
+    await _login(cl)
+    c.speed.record_detection("simulated", 0.8)
+    r = await cl.get("/api/system/speed")
+    assert r.status_code == 200
+    body = r.json()
+    assert {"detection", "streams", "send_routes", "copy_delay", "fees", "routes"} <= set(body)
+    assert body["detection"]["simulated"]["n"] == 1
+    fees = body["fees"]
+    assert fees["kind"] == "priority" and fees["observed_lamports"] is None
+    assert fees["expected_lamports"] <= 5_000 + 1_000_000 and fees["max_trade_pct"] == 0.5
+    assert body["routes"] is None  # simulated providers: no live sending

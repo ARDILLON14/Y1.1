@@ -56,6 +56,14 @@ tokens Bearer, campos con nombres sensibles).
 - **Topes propios** por transacción, por día (persistidos, sobreviven a
   reinicios) y por minuto.
 
+**Rutas de envío.** Una transacción firmada puede enviarse a varios destinos
+(RPC principal, RPC extra, block engine de Jito). Enviarla a más sitios no
+cambia lo que hace (la firma cubre todo su contenido), pero quien la recibe la
+ve antes de que entre en un bloque. Por eso las URLs de envío solo se
+configuran en el YAML o como secreto (`SOLANA_SEND_RPC_URLS`), nunca desde el
+dashboard, y `execution.jito_only` permite enviarla solo a Jito en modo
+*bundle-only* (sin exposición pública previa).
+
 **Límite conocido.** El firmador no decodifica la instrucción de ruta de
 Jupiter; un proceso de trading comprometido podría pedir un swap a mal precio
 *dentro* de los topes del firmador. Mitigaciones: wallet con el capital justo,

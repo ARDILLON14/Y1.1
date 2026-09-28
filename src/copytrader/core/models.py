@@ -323,6 +323,8 @@ class OrderRequest:
     max_price_deviation_pct: float | None = None
     expires_at: datetime | None = None
     trace_id: str | None = None
+    trigger: str | None = None  # exits: what triggered it (decides the fee urgency)
+    attempt: int = 1  # exits: 2+ when a previous exit of the position failed
 
 
 @dataclass(slots=True)
@@ -346,3 +348,5 @@ class ExecutionResult:
     error: str | None = None
     executed_at: datetime | None = None
     retryable: bool = False
+    network_fee_lamports: int | None = None  # base + priority fee + tip (paid live; modeled in paper)
+    fee_decision: dict[str, Any] | None = None  # what the fee policy chose for this transaction

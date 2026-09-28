@@ -114,9 +114,11 @@ Estos riesgos **no están eliminados**; conviene conocerlos antes de usar dinero
 **P2 — calidad de ejecución y datos**
 
 - Stream de menor latencia (Yellowstone gRPC / LaserStream de Helius).
+  *(Hecho: stream de respaldo en paralelo; pendiente gRPC.)*
 - Estimación dinámica de priority fee y envío vía bundles de Jito para
-  reducir el riesgo de sandwich.
+  reducir el riesgo de sandwich. *(Hecho: ver §6.)*
 - Comprobación de honeypot antes de comprar: cotizar y simular la venta.
+  *(Hecho en parte: se cotiza la venta; la simulación en cadena está pendiente.)*
 - Backfill con la API de transacciones enriquecidas de Helius (menos llamadas).
 - **"Copiabilidad" por wallet**: comparar el resultado de *nuestras* copias con
   el de la wallet origen y degradar automáticamente las wallets cuyo
@@ -146,6 +148,10 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | Cada señal se juzgaba solo con límites de riesgo, sin considerar su valor esperado, la confirmación de otras wallets, la posibilidad de vender ni el estado del mercado | **Filtros por señal**: valor esperado tras los costes de esa copia, confluencia de wallets independientes (sube el tamaño), riesgos de RugCheck bloqueantes (holders concentrados, liquidez sin bloquear…), cotización de la venta antes de comprar, y régimen de mercado (reduce el tamaño o bloquea) |
 | La selección no aprendía de lo que realmente devolvía copiar cada wallet, y una wallet recién seleccionada operaba con dinero real desde su primera señal | **Aprendizaje propio**: la ventaja copiable se corrige con las copias reales (mezcla bayesiana con la estimación) y las wallets que pierden al copiarlas pasan a OBSERVAR; **periodo de prueba** en paper por wallet antes del dinero real |
 | No se medía qué pasaba con lo rechazado ni de dónde venía el resultado | **Medición**: seguimiento del precio tras cada decisión (también las rechazadas) y página *Análisis* con la lectura de cada filtro, resultado real vs estimado por wallet, por salida, por retraso y costes; **comparación de configuraciones** en el backtest |
+| Un único stream (si iba lento o caía, se llegaba tarde) y descarga de cada transacción con esperas de 250 ms, 500 ms, 750 ms… | **Stream de respaldo** en paralelo (gana el primero; la transacción completa de un stream lento ahorra la descarga del otro) y reintentos cortos que crecen (100 ms ×1,6) |
+| La misma priority fee máxima para una entrada de 10 USD que para una salida por stop loss; el modelo de costes asumía siempre el tope | **Comisiones dinámicas**: nivel por urgencia (las salidas de protección y los reintentos pagan el máximo), tope en % del tamaño para lo demás, propina de Jito según el mercado, y el modelo de costes usa la mediana de lo que pagan de verdad tus operaciones |
+| Cada transacción salía solo por el RPC principal | **Envío por varias rutas** a la vez (RPC, RPC extra, block engine de Jito) y modo solo-Jito *bundle-only* contra sándwiches |
+| La cotización de la venta (ruta de salida) esperaba a la de la compra y se repetía para cada señal del mismo token; los datos de mercado del token esperaban a los de RugCheck/mint | Cotización de venta en paralelo con la compra, caché de 5 min por token y datos del token pedidos a la vez a sus tres fuentes |
 
 Efecto medido en el mercado simulado (walk-forward, mismos datos): con los
 costes reales, la selección anterior elegía también scalpers y una wallet
@@ -165,11 +171,13 @@ confirma que el mecanismo funciona, no que el mercado real vaya a ser rentable.
    fiable: presión compradora reciente, concentración de holders calculada
    directamente (no solo el aviso de RugCheck) y simulación completa de la
    venta en cadena.
-3. **Ejecución**: stream de menor latencia, priority fee dinámica, Jito.
-4. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
+3. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
    por caída de liquidez o por ventas de varias wallets seguidas.
-5. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
+4. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
    evaluar stop loss ni take profit entre operaciones).
+5. **Ejecución, siguiente paso**: stream gRPC (Yellowstone / LaserStream), que
+   necesita un proveedor de pago y otra dependencia; confirmación por
+   suscripción en lugar de consultar el estado cada 0,4 s.
 
 ## 7. Conclusión
 

@@ -275,6 +275,8 @@ class PositionManager:
                 theoretical_price_usd=price,
                 notional_usd=(qty / 10**decimals * price) if price else None,
                 trace_id=trace_id,
+                trigger=trigger,
+                attempt=self._backoff.get(position_id, (0.0, 0))[1] + 1,
             )
             log.info(
                 "exit_triggered", position=position_id, trigger=trigger, fraction=round(fraction, 4), reason=reason

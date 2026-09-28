@@ -57,6 +57,10 @@ LOCKED_KEYS: frozenset[str] = frozenset(
         "levels.require_arm",
         "execution.wallet_public_key",
         "execution.quote_mint",
+        # where signed transactions and fee data go: YAML only (read at startup)
+        "execution.jito_block_engine_urls",
+        "execution.extra_send_urls",
+        "execution.jito_tip_floor_url",
     }
 )
 

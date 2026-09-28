@@ -24,18 +24,21 @@ from copytrader.core.events import EventBus, ProviderStatusChanged
 from copytrader.core.models import TokenInfo
 from copytrader.core.types import TradeMode
 from copytrader.db.base import Database
-from copytrader.db.repositories import DbConfigStore, TokenRepo
+from copytrader.db.repositories import DbConfigStore, OrderRepo, TokenRepo
 from copytrader.execution.base import Executor
+from copytrader.execution.fees import FeePolicy, FeeTracker, JitoTipFloor
 from copytrader.execution.live import LiveExecutor
 from copytrader.execution.mode import ModeController
 from copytrader.execution.paper import PaperExecutor
 from copytrader.execution.recovery import OrderRecovery
+from copytrader.execution.sender import JitoBlockEngine, TransactionSender
 from copytrader.execution.service import ExecutionGuard, ExecutionService
 from copytrader.execution.token_accounts import TokenAccountJanitor
 from copytrader.measurement.outcomes import OutcomeTracker
 from copytrader.notifications.channels import Channel, DiscordChannel, NotificationService, TelegramChannel
 from copytrader.observability import metrics
-from copytrader.observability.health import HealthRegistry
+from copytrader.observability.health import HealthRegistry, HealthStatus
+from copytrader.observability.speed import SpeedStats
 from copytrader.pipeline.copy_pipeline import CopyPipeline
 from copytrader.positions.manager import PositionManager
 from copytrader.providers.interfaces import HistorySource, QuoteSource, SolPriceHistory, SwapFeed
@@ -51,6 +54,8 @@ from copytrader.security.redaction import REDACTOR
 from copytrader.signals.engine import SignalEngine
 
 log = structlog.get_logger(__name__)
+
+BACKUP_STREAM_PREFIX = "backup_"
 
 
 @dataclass
@@ -76,6 +81,8 @@ class Container:
         self.clock = clock or SystemClock()
         self.bus = EventBus()
         self.health = HealthRegistry()
+        self.speed = SpeedStats()
+        self.sender: TransactionSender | None = None  # live providers only
         self.db = db or Database(secrets.database_url.get_secret_value())
         self.token_locks = KeyedLocks()
         REDACTOR.register(secrets.all_secret_values())
@@ -83,6 +90,7 @@ class Container:
         self._bg: set[asyncio.Task[None]] = set()
 
         cfg = self.cfg
+        self.fees = FeePolicy(self.get_cfg, FeeTracker(cfg.execution.fee_samples_window))
         self.providers = self._build_providers(cfg)
         self.tokens = self.providers.tokens
         self.collector = WalletCollector(
@@ -102,7 +110,7 @@ class Container:
             db=self.db, clock=self.clock, config=self.get_cfg, risk=self.risk, mode=self.mode
         )
         executors: dict[TradeMode, Executor] = {
-            TradeMode.PAPER: PaperExecutor(self.providers.quotes, self.tokens, self.clock, self.get_cfg)
+            TradeMode.PAPER: PaperExecutor(self.providers.quotes, self.tokens, self.clock, self.get_cfg, self.fees)
         }
         if self.providers.live_executor is not None:
             executors[TradeMode.LIVE] = self.providers.live_executor
@@ -114,6 +122,7 @@ class Container:
             executors=executors,
             guard=ExecutionGuard(self.get_cfg, self.mode, self.kill, self.risk),
             risk=self.risk,
+            fees=self.fees,
         )
         self.signals = SignalEngine(
             db=self.db, clock=self.clock, config=self.get_cfg, bus=self.bus, mode=self.mode, chain=cfg.app.chain
@@ -139,6 +148,7 @@ class Container:
             tokens=self.tokens,
             signals=self.signals,
             token_locks=self.token_locks,
+            fees=self.fees,
         )
         self.signals.entry_handler = self.pipeline
         self.signals.exit_handler = self.positions
@@ -158,6 +168,7 @@ class Container:
         )
         self.cycle.on_selection(self._on_selection)
         self.pipeline.regime = lambda: self.cycle.current_regime
+        self.cycle.swap_fee = self.fees.expected_swap_fee_lamports
         self.recovery = OrderRecovery(
             db=self.db,
             clock=self.clock,
@@ -275,8 +286,10 @@ class Container:
                 categorizer=categorizer,
                 on_update=self._on_token_update,
             )
+            feed = sim.SimulatedFeed(market)
+            feed.speed = self.speed
             return Providers(
-                feed=sim.SimulatedFeed(market),
+                feed=feed,
                 history=sim.SimulatedHistorySource(market),
                 tokens=tokens,
                 quotes=sim.SimulatedQuotes(market),
@@ -343,18 +356,27 @@ class Container:
         history = RpcHistorySource(
             rpc, sol_history, quote_mints=p.quote_mints, concurrency=sol.backfill_concurrency, clock=self.clock
         )
-        settings = StreamSettings(
-            url=ws_url,
-            commitment=sol.commitment,
-            ping_interval=sol.ws_ping_interval_seconds,
-            stale_timeout=sol.ws_stale_timeout_seconds,
-            max_backoff=sol.reconnect_max_backoff_seconds,
-            max_subscriptions_per_connection=sol.max_subscriptions_per_connection,
-        )
-        stream_cls = HeliusTransactionStream if sol.stream == "helius_transaction_subscribe" else LogsSubscribeStream
-        stream = stream_cls(settings, on_status=self._on_stream_status)
+        stream_types = {"logs_subscribe": LogsSubscribeStream, "helius_transaction_subscribe": HeliusTransactionStream}
+
+        def make_stream(kind: str, url: str, name: str | None = None) -> Any:
+            settings = StreamSettings(
+                url=url,
+                commitment=sol.stream_commitment or sol.commitment,
+                ping_interval=sol.ws_ping_interval_seconds,
+                stale_timeout=sol.ws_stale_timeout_seconds,
+                max_backoff=sol.reconnect_max_backoff_seconds,
+                max_subscriptions_per_connection=sol.max_subscriptions_per_connection,
+            )
+            return stream_types[kind](settings, name=name, on_status=self._on_stream_status)
+
+        streams = [make_stream(sol.stream, ws_url)]
+        if sol.backup_stream != "none":
+            backup_url = self.secrets.rpc_ws_url_backup(sol.backup_ws_url) or ws_url
+            if backup_url == ws_url:
+                log.warning("backup_stream_same_url", detail="same provider: only the subscription type is redundant")
+            streams.append(make_stream(sol.backup_stream, backup_url, f"{BACKUP_STREAM_PREFIX}{sol.backup_stream}"))
         feed = SolanaSwapFeed(
-            stream,
+            streams,
             rpc,
             history,
             sol_price=tokens.sol_price,
@@ -365,8 +387,10 @@ class Container:
             tx_retry_delay=sol.get_transaction_retry_delay_ms / 1000,
             reconcile_interval=sol.reconcile_poll_interval_seconds,
             dedupe_size=cfg.signals.dedupe_cache_size,
+            speed=self.speed,
         )
         signer = self._build_signer(cfg)
+        sender = self.sender = self._build_sender(cfg, rpc)
         live = None
         if signer is not None and cfg.execution.wallet_public_key:
             live = LiveExecutor(
@@ -377,7 +401,13 @@ class Container:
                 tokens=tokens,
                 clock=self.clock,
                 config=self.get_cfg,
+                fees=self.fees,
+                sender=sender,
             )
+        # landed Jito tips: dynamic tip in live and realistic tip costs in paper (polled only with Jito on)
+        self.fees.tip_floor = JitoTipFloor(
+            self._http("jito_tip_floor", timeout=5, rate=1), cfg.execution.jito_tip_floor_url
+        )
         return Providers(
             feed=feed,
             history=history,
@@ -389,6 +419,27 @@ class Container:
             signer=signer,
         )
 
+    def _build_sender(self, cfg: AppConfig, rpc: Any) -> TransactionSender:
+        """Routes for signed transactions: main RPC, extra RPCs and Jito (read at startup)."""
+        from copytrader.providers.solana.rpc import SolanaRpc
+
+        ex = cfg.execution
+        urls = list(dict.fromkeys([*ex.extra_send_urls, *self.secrets.send_rpc_urls()]))
+        extra = [
+            SolanaRpc(self._http(f"send_rpc_{i}", timeout=3, rate=20), url, cfg.providers.solana.commitment)
+            for i, url in enumerate(urls, 1)
+        ]
+        auth = self.secrets.jito_auth_uuid.get_secret_value() if self.secrets.jito_auth_uuid else None
+        jito_http = self._http("jito", timeout=3, rate=5)
+        jito = [JitoBlockEngine(jito_http, url, auth=auth) for url in ex.jito_block_engine_urls]
+        return TransactionSender(self.get_cfg, rpc, extra_rpcs=extra, jito=jito, speed=self.speed)
+
+    async def load_fee_history(self) -> None:
+        """Seed the fee tracker with the fees our latest live swaps actually paid."""
+        async with self.db.session() as s:
+            fees = await OrderRepo(s).recent_network_fees(TradeMode.LIVE, self.cfg.execution.fee_samples_window)
+        self.fees.tracker.load(fees)
+
     async def _cursor(self, address: str) -> str | None:
         return await self.collector.cursor(address)
 
@@ -396,7 +447,9 @@ class Container:
         if connected:
             self.health.ok(name, "websocket")
         else:
-            self.health.fail(name, "websocket", detail)
+            # the backup going down only degrades: the main stream still detects everything
+            status = HealthStatus.DEGRADED if name.startswith(BACKUP_STREAM_PREFIX) else HealthStatus.DOWN
+            self.health.fail(name, "websocket", detail, status=status)
         self.bus.publish(ProviderStatusChanged(provider=name, kind="websocket", healthy=connected, detail=detail))
 
     def _build_signer(self, cfg: AppConfig) -> Any:

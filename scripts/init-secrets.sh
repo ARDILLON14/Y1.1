@@ -24,7 +24,8 @@ put database_url "postgresql+asyncpg://copytrader:${PGPASS}@postgres:5432/copytr
 put signer_hmac_key "$(gen 48)"
 put data_encryption_key "$(python3 -c 'import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 put grafana_admin_password "$(gen 18)"
-for optional in solana_rpc_url solana_ws_url helius_api_key jupiter_api_key telegram_bot_token \
+for optional in solana_rpc_url solana_ws_url solana_ws_url_backup solana_send_rpc_urls jito_auth_uuid \
+                helius_api_key jupiter_api_key telegram_bot_token \
                 discord_webhook_url signer_hmac_key_previous keystore_passphrase; do
   put "$optional" ""
 done

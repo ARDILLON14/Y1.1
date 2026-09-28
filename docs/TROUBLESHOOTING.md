@@ -170,6 +170,30 @@ El firmador rechazó la transacción (programa no permitido, tope por
 transacción/día/minuto superado, priority fee alta…). Es la última barrera:
 revisa el motivo en los logs del firmador antes de relajar sus topes.
 
+**`tip ... exceeds cap` en el firmador**
+Activaste Jito con `execution.jito_tip_lamports` por encima de
+`SIGNER_MAX_TIP_LAMPORTS` del firmador. Sube ese tope del firmador hasta el
+máximo que quieras pagar (o baja `jito_tip_lamports`) y reinícialo.
+
+**`send_route_failed` en los logs**
+Una ruta de envío (Jito, un RPC extra) rechazó o no respondió. No es un error
+mientras otra ruta acepte: la orden solo falla si **todas** rechazan. Con Jito,
+un `429` suele ser su límite por IP (usa `JITO_AUTH_UUID` o más regiones en
+`jito_block_engine_urls`). Mira *Sistema → Velocidad y comisiones → Rutas de
+envío*.
+
+**Entradas que caducan sin aterrizar con la red congestionada**
+Con `priority_fee_max_trade_pct` las operaciones pequeñas pagan poca prioridad.
+Es a propósito: pagar un 3 % de comisión para entrar no compensa. Si pasa a
+menudo, sube el tamaño mínimo (`risk.min_trade_usd`) antes que el porcentaje.
+
+**Detección lenta**
+*Sistema → Velocidad y comisiones*: si la detección mediana supera 1-2 s, usa
+`helius_transaction_subscribe` o un proveedor más rápido, y añade un
+`backup_stream` de otro proveedor. Con `logs_subscribe` cada transacción se
+descarga aparte; `transaction_not_available` en los logs indica un RPC lento
+indexando.
+
 **Kill switch global por "descuadre de saldos"**
 Los saldos on-chain no cuadran con las posiciones. Causa habitual: mover
 tokens o SOL a mano en la wallet del bot. Revisa *Posiciones* frente a la

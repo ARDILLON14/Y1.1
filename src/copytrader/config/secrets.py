@@ -36,6 +36,9 @@ class Secrets(BaseSettings):
     database_url: SecretStr = SecretStr("sqlite+aiosqlite:///./data/copytrader.db")
     solana_rpc_url: SecretStr | None = None
     solana_ws_url: SecretStr | None = None
+    solana_ws_url_backup: SecretStr | None = None
+    solana_send_rpc_urls: SecretStr | None = None  # extra send endpoints, comma-separated
+    jito_auth_uuid: SecretStr | None = None  # optional x-jito-auth (higher Jito rate limits)
     helius_api_key: SecretStr | None = None
     jupiter_api_key: SecretStr | None = None
     telegram_bot_token: SecretStr | None = None
@@ -78,6 +81,14 @@ class Secrets(BaseSettings):
     def rpc_ws_url(self, default: str) -> str:
         return self.solana_ws_url.get_secret_value() if self.solana_ws_url else default
 
+    def rpc_ws_url_backup(self, default: str | None) -> str | None:
+        return self.solana_ws_url_backup.get_secret_value() if self.solana_ws_url_backup else default
+
+    def send_rpc_urls(self) -> list[str]:
+        if not self.solana_send_rpc_urls:
+            return []
+        return [u.strip() for u in self.solana_send_rpc_urls.get_secret_value().split(",") if u.strip()]
+
     def all_secret_values(self) -> list[str]:
         """Every configured secret value (for the log/notification redactor)."""
         out: list[str] = []
@@ -85,7 +96,9 @@ class Secrets(BaseSettings):
             value = getattr(self, name)
             if isinstance(value, SecretStr):
                 raw = value.get_secret_value()
-                if raw and name != "database_url":
+                if raw and name == "solana_send_rpc_urls":
+                    out.extend([raw, *self.send_rpc_urls()])
+                elif raw and name != "database_url":
                     out.append(raw)
                 elif raw and "@" in raw:
                     # only the credential part of a DB URL is secret

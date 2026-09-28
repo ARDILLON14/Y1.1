@@ -64,6 +64,7 @@ def request_from_order(order: Order) -> OrderRequest:
         theoretical_price_usd=ctx.get("theoretical_price_usd"),
         notional_usd=order.notional_usd,
         trace_id=order.trace_id,
+        trigger=order.trigger,
     )
 
 

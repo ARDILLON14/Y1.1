@@ -112,6 +112,22 @@ class OrderRepo:
             stmt = stmt.where(Order.mode == mode.value)
         return (await self.s.execute(stmt.order_by(Order.id))).scalars().all()
 
+    async def recent_network_fees(self, mode: TradeMode = TradeMode.LIVE, limit: int = 50) -> list[int]:
+        """Network fees (lamports) of the latest confirmed orders, oldest first."""
+        stmt = (
+            select(Order.context)
+            .where(Order.mode == mode.value, Order.status == OrderStatus.CONFIRMED.value)
+            .order_by(Order.id.desc())
+            .limit(limit * 2)
+        )
+        fees: list[int] = []
+        contexts: Sequence[dict[str, Any] | None] = (await self.s.execute(stmt)).scalars().all()
+        for ctx in contexts:
+            value = (ctx or {}).get("network_fee_lamports")
+            if isinstance(value, int | float) and value > 0:
+                fees.append(int(value))
+        return list(reversed(fees[:limit]))
+
     async def list(self, *, limit: int = 100, mode: str | None = None) -> Sequence[Order]:
         stmt = select(Order).order_by(Order.id.desc()).limit(limit)
         if mode:

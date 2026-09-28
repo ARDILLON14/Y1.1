@@ -17,7 +17,9 @@ dashboard and notifications can say *exactly* why a trade was or wasn't copied.
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Any, NoReturn
@@ -45,9 +47,11 @@ from copytrader.db.base import Database
 from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo, TransactionRepo
 from copytrader.execution.base import quote_price_usd
 from copytrader.execution.costs import lamports_to_usd, round_trip_cost_lamports
+from copytrader.execution.fees import FeePolicy
 from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
+from copytrader.resilience.rate_limiter import Priority
 from copytrader.risk.engine import EntryRequest, RiskEngine
 from copytrader.signals.engine import SignalContext, SignalEngine, WalletInfo, copyable, signal_age_limit
 
@@ -84,6 +88,7 @@ class CopyPipeline:
         tokens: Any,
         signals: SignalEngine,
         token_locks: KeyedLocks,
+        fees: FeePolicy | None = None,
     ) -> None:
         self.db = db
         self.clock = clock
@@ -96,6 +101,8 @@ class CopyPipeline:
         self.signals = signals
         self.regime: Callable[[], str | None] = lambda: None  # current SOL market regime (set by the container)
         self.locks = token_locks
+        self.fees = fees or FeePolicy(config)
+        self._sell_ok: OrderedDict[str, tuple[int, float, float]] = OrderedDict()  # recent passing exit checks
 
     # ------------------------------------------------------------------ entry
     async def process_entry(self, ctx: SignalContext) -> None:
@@ -363,11 +370,22 @@ class CopyPipeline:
             # 8c. expected value of THIS copy: the wallet's copy edge minus this trade's extra costs
             if cfg.filters.min_expected_value_pct is not None:
                 self._check_expected_value(info, cost_pct, cfg.filters.min_expected_value_pct, checks)
-            # 5. slippage for OUR size + 10b. deviation after the delay
-            quote, _ = await self._quote_and_validate(ctx, token, rd.size_usd, checks, state)
-            # 5b. can we get out? quote the sale of what we would receive (honeypot / no exit route)
-            if cfg.filters.check_sell_route:
-                await self._check_sell_route(ctx, quote, checks, state["mode"])
+            # 5b (started now, checked below). can we get out? The sale of what we would receive is
+            # quoted at the same time as the buy, from the expected amount, unless verified recently.
+            sell_probe = (
+                self._start_sell_probe(ctx, token, rd.size_usd, state["mode"]) if cfg.filters.check_sell_route else None
+            )
+            try:
+                # 5. slippage for OUR size + 10b. deviation after the delay
+                quote, _ = await self._quote_and_validate(ctx, token, rd.size_usd, checks, state)
+                if cfg.filters.check_sell_route:
+                    await self._check_sell_route(ctx, quote, checks, state["mode"], sell_probe)
+            finally:
+                if sell_probe is not None:
+                    if not sell_probe.done():
+                        sell_probe.cancel()
+                    elif not sell_probe.cancelled():
+                        sell_probe.exception()  # a rejection may have skipped awaiting it: mark it retrieved
             # 10c. TTL right before sending (+ re-quote if the quote got old)
             ttl_age = (self.clock.now() - ctx.detected_at).total_seconds()
             self._check(
@@ -507,26 +525,86 @@ class CopyPipeline:
         self._check(checks, CheckResult("regime", "Régimen de mercado permitido", not blocked, message=detail))
         return tuple(factors)
 
+    def _recent_sell_route(self, mint: str) -> tuple[int, float, float] | None:
+        """(tokens quoted, round-trip loss %, monotonic time) of a recent passing check, if still valid."""
+        ttl = self._config().filters.sell_route_cache_seconds
+        hit = self._sell_ok.get(mint)
+        if hit is None or ttl <= 0 or time.monotonic() - hit[2] > ttl:
+            return None
+        return hit
+
+    def _start_sell_probe(
+        self, ctx: SignalContext, token: TokenInfo, size_usd: float, mode: TradeMode
+    ) -> asyncio.Task[Quote] | None:
+        """Quote the exit in parallel with the buy, from the amount we expect to receive."""
+        if self._recent_sell_route(ctx.swap.token_mint) or not token.price_usd or token.decimals is None:
+            return None
+        expected_raw = int(size_usd / token.price_usd * 10 ** int(token.decimals))
+        if expected_raw <= 0:
+            return None
+        return asyncio.ensure_future(self._sell_quote(ctx.swap.token_mint, expected_raw, mode))
+
+    async def _sell_quote(self, mint: str, amount_raw: int, mode: TradeMode) -> Quote:
+        cfg = self._config()
+        executor = self.execution.executor(mode)
+        # below entries and exits in the rate limiter: a check must not delay an order being executed
+        return await executor.quote(
+            mint, cfg.execution.quote_mint, amount_raw, int(cfg.exits.exit_slippage_pct * 100), priority=Priority.NORMAL
+        )
+
     async def _check_sell_route(
-        self, ctx: SignalContext, buy: Quote, checks: list[CheckResult], mode: TradeMode
+        self,
+        ctx: SignalContext,
+        buy: Quote,
+        checks: list[CheckResult],
+        mode: TradeMode,
+        probe: asyncio.Task[Quote] | None = None,
     ) -> None:
         """Quote selling the tokens the buy would give us: no route, or a round trip losing more than
         ``filters.max_round_trip_quote_loss_pct`` (impact both ways), means we might not get out."""
         cfg = self._config()
         limit = cfg.filters.max_round_trip_quote_loss_pct
-        executor = self.execution.executor(mode)
-        slippage_bps = int(cfg.exits.exit_slippage_pct * 100)
+        mint = ctx.swap.token_mint
+        recent = self._recent_sell_route(mint)
+        if recent is not None and buy.out_amount_raw <= recent[0] * 1.5:
+            age = time.monotonic() - recent[2]
+            self._check(
+                checks,
+                CheckResult(
+                    "sell_route",
+                    _SELL_LABEL,
+                    recent[1] <= limit,
+                    round(recent[1], 2),
+                    limit,
+                    f"verificado hace {age:.0f} s con un tamaño similar: perdería {recent[1]:.2f}% (máx {limit:g}%)",
+                ),
+            )
+            return
+        sell: Quote | None = None
         try:
-            sell = await executor.quote(ctx.swap.token_mint, cfg.execution.quote_mint, buy.out_amount_raw, slippage_bps)
+            if probe is not None:
+                sell = await probe
+                # the probe used the expected amount: redo it if the real one is very different
+                if abs(sell.in_amount_raw - buy.out_amount_raw) > 0.3 * buy.out_amount_raw:
+                    sell = None
+            if sell is None:
+                sell = await self._sell_quote(mint, buy.out_amount_raw, mode)
         except CopyTraderError as exc:
             self._fail(checks, CheckResult("sell_route", _SELL_LABEL, False, message=f"sin ruta de venta: {exc}"))
-        loss = (1 - sell.out_amount_raw / buy.in_amount_raw) * 100 if buy.in_amount_raw else 100.0
+        # SOL back per SOL in: buy rate x sell rate (the probe may have quoted a slightly different amount)
+        back = (buy.out_amount_raw / buy.in_amount_raw) * (sell.out_amount_raw / sell.in_amount_raw)
+        loss = (1 - back) * 100 if buy.in_amount_raw and sell.in_amount_raw else 100.0
+        passed = loss <= limit
+        if passed:
+            self._sell_ok[mint] = (buy.out_amount_raw, loss, time.monotonic())
+            while len(self._sell_ok) > 2_000:
+                self._sell_ok.popitem(last=False)
         self._check(
             checks,
             CheckResult(
                 "sell_route",
                 _SELL_LABEL,
-                loss <= limit,
+                passed,
                 round(loss, 2),
                 limit,
                 f"comprar y vender ahora perdería {loss:.2f}% (máx {limit:g}%) · {sell.route_label}",
@@ -590,7 +668,8 @@ class CopyPipeline:
         if not sol_price:
             no_price = CheckResult("round_trip_cost", _COST_LABEL, False, message="precio de SOL no disponible")
             self._fail(checks, no_price)
-        cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg), sol_price)
+        swap_fee = self.fees.expected_swap_fee_lamports(size_usd, sol_price)
+        cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg, swap_fee), sol_price)
         pct: float = cost_usd / size_usd * 100 if size_usd > 0 else float("inf")
         self._check(
             checks,

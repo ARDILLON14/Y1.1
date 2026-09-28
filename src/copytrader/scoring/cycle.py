@@ -96,6 +96,8 @@ class EvaluationCycle:
         self.scorer = ScoringEngine(config)
         self._listeners: list[SelectionListener] = []
         self._lock = asyncio.Lock()
+        # expected network cost of one swap for a size (set by the container: FeePolicy)
+        self.swap_fee: Callable[[float, float], int] | None = None
         self.last_report: CycleReport | None = None
         self.current_regime: str | None = None  # SOL market regime at the last evaluation
 
@@ -134,7 +136,9 @@ class EvaluationCycle:
             sol_price = await self.tokens.sol_price()
         except CopyTraderError:
             sol_price = None
-        return build_params(cfg, latency_seconds=latency, sol_price_usd=sol_price, latency_source=source)
+        return build_params(
+            cfg, latency_seconds=latency, sol_price_usd=sol_price, latency_source=source, swap_fee=self.swap_fee
+        )
 
     async def run(self) -> CycleReport:
         async with self._lock:

@@ -148,7 +148,10 @@ class TokenInfoService:
         now_mono = self.clock.monotonic()
         max_age = max_age_seconds if max_age_seconds is not None else self._config().providers.token_info_ttl_seconds
         stale = [m for m in mints if not (c := self._market_cache.get(m, now_mono)) or now_mono - c[1] > max_age]
-        if stale:
+
+        async def refresh_market() -> None:
+            if not stale:
+                return
             try:
                 fresh = await self.market.token_market(stale)
             except CopyTraderError as exc:
@@ -157,7 +160,10 @@ class TokenInfoService:
             wall = self.clock.now()
             for mint, data in fresh.items():
                 self._market_cache.set(mint, (data, now_mono, wall), now_mono)
-        statics = await asyncio.gather(*(self._static(m) for m in mints))
+
+        # market data, mint account and risk report come from different providers: fetch them together
+        statics_all = asyncio.gather(*(self._static(m) for m in mints))
+        _, statics = await asyncio.gather(refresh_market(), statics_all)
         out: dict[str, TokenInfo] = {}
         for mint, (mint_data, risk_data) in zip(mints, statics, strict=True):
             cached = self._market_cache.get(mint, now_mono)

@@ -100,6 +100,10 @@ async def test_paper_fill_charges_the_live_network_costs(close_accounts):
         slippage_bps=150,
     )
     result = await ex.run(_Handle(), req, None)
-    expected = swap_fee_lamports(c) + (0 if close_accounts else TOKEN_ACCOUNT_RENT_LAMPORTS)
+    # 0.1 SOL = 20 USD: the priority fee is capped at 0.5 % of the trade (execution.priority_fee_max_trade_pct)
+    assert swap_fee_lamports(c, 20.0, 200.0) == 5_000 + 500_000 < swap_fee_lamports(c)
+    expected = swap_fee_lamports(c, 20.0, 200.0) + (0 if close_accounts else TOKEN_ACCOUNT_RENT_LAMPORTS)
     assert result.success
     assert result.fees_usd == pytest.approx(lamports_to_usd(expected, 200.0))
+    assert result.network_fee_lamports == 505_000
+    assert result.fee_decision["source"] == "size_cap" and result.fee_decision["priority_level"] == "veryHigh"

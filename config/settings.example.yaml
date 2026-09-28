@@ -38,12 +38,20 @@ providers:
     # helius_transaction_subscribe: Helius Enhanced WebSocket (tx completa en el evento: más rápido)
     stream: logs_subscribe
     commitment: confirmed
+    # Commitment solo del stream (null = el de arriba). "processed" detecta ~0,5-1 s antes, pero una
+    # pequeña parte de esas tx nunca se confirma. Solo sirve con helius_transaction_subscribe.
+    stream_commitment: null
+    # Segundo stream en paralelo (none | logs_subscribe | helius_transaction_subscribe): cada tx se
+    # procesa con el PRIMERO que la entregue. URL: secreto SOLANA_WS_URL_BACKUP, si no backup_ws_url,
+    # si no la principal (entonces solo es redundante el tipo de suscripción, no el proveedor).
+    backup_stream: none
+    backup_ws_url: null
     max_subscriptions_per_connection: 100
     ws_ping_interval_seconds: 20
     ws_stale_timeout_seconds: 180      # sin mensajes en este tiempo → reconectar
     reconnect_max_backoff_seconds: 60
-    get_transaction_retries: 8
-    get_transaction_retry_delay_ms: 250
+    get_transaction_retries: 12
+    get_transaction_retry_delay_ms: 100  # primera espera; crece x1,6 por intento hasta 1 s
     catchup_on_reconnect: true         # recupera operaciones perdidas tras una desconexión
     reconcile_poll_interval_seconds: 300   # red de seguridad (no es el mecanismo principal)
     backfill_max_signatures_per_wallet: 1000
@@ -276,13 +284,34 @@ execution:                            # [en caliente, salvo las claves bloqueada
   confirm_timeout_seconds: 60
   rebroadcast_interval_ms: 1500
   skip_preflight: true
-  jito_tip_lamports: 0
+  jito_tip_lamports: 0                 # > 0: propina Jito en lugar de priority fee (este valor es el máximo)
   entry_max_attempts: 2
   exit_max_attempts: 5
   reconcile_interval_seconds: 30
   close_empty_token_accounts: true     # cierra las cuentas de token vacías tras vender y recupera
                                        # su alquiler (~0,002 SOL por token). Solo con trading real armado.
   close_accounts_interval_seconds: 120
+  # --- comisiones dinámicas
+  exit_priority_level: high            # salidas rutinarias (take profit, tiempo). Las de protección
+                                       # (stop, trailing, emergencia, kill switch, venta del origen,
+                                       # manual) y los reintentos: veryHigh y el tope completo
+  priority_fee_max_trade_pct: 0.5      # priority fee (o propina) ≤ 0,5 % del tamaño; null = solo el tope
+  min_priority_fee_lamports: 10000     # suelo para operaciones muy pequeñas
+  jito_tip_percentile: 50              # propina = percentil de las propinas que aterrizan (25|50|75|95|99);
+                                       # null = siempre jito_tip_lamports (que es el máximo)
+  min_jito_tip_lamports: 1000          # mínimo de Jito
+  jito_tip_floor_url: https://bundles.jito.wtf/api/v1/bundles/tip_floor   # [bloqueada]
+  fee_min_samples: 5                   # con N operaciones reales, su mediana sustituye a las estimaciones
+  fee_samples_window: 50
+  # --- rutas de envío (la misma tx firmada por varias vías; solo puede ejecutarse una vez)
+  send_via_jito: false                 # también por el block engine de Jito (requiere jito_tip_lamports ≥ 1000)
+  jito_only: false                     # SOLO por Jito y bundle-only: sin sándwiches, pero solo aterriza
+                                       # cuando el líder es un validador Jito (las salidas de protección
+                                       # salen igualmente por todas las rutas)
+  jito_block_engine_urls:              # [bloqueada] regiones: amsterdam., frankfurt., ny., tokyo., slc.
+    - https://mainnet.block-engine.jito.wtf/api/v1/transactions
+  extra_send_urls: []                  # [bloqueada] RPC extra que también reciben cada tx. Las que llevan
+                                       # API key van en el secreto SOLANA_SEND_RPC_URLS (separadas por comas)
 
 paper:                                # [en caliente]  paper trading
   simulated_latency_ms: 800
@@ -377,6 +406,7 @@ filters:                              # [en caliente]  filtros por señal (adem�
     - creator history of rugged
   check_sell_route: true               # antes de comprar, cotizar la venta: sin ruta = no se compra
   max_round_trip_quote_loss_pct: 10    # pérdida máxima de comprar y vender al instante (impacto ida y vuelta)
+  sell_route_cache_seconds: 300        # un token verificado hace poco (tamaño similar) no se vuelve a cotizar
   regime_size_multipliers:             # régimen de mercado (movimiento de SOL en 24 h) → tamaño
     extreme_down: 0.5
     extreme_up: 0.75

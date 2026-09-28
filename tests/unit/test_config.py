@@ -103,6 +103,16 @@ async def test_service_blocks_non_runtime_sections():
         await svc.apply_patch({"levels": {"require_arm": False}}, author="me")
     with pytest.raises(ConfigError):
         await svc.apply_patch({"security": {"signer_mode": "local"}}, author="me")
+    # where signed transactions are sent is YAML-only (a stolen session must not redirect them)
+    for key, value in (
+        ("extra_send_urls", ["https://evil.example"]),
+        ("jito_block_engine_urls", ["https://evil.example"]),
+        ("jito_tip_floor_url", "https://evil.example"),
+    ):
+        with pytest.raises(ConfigError):
+            await svc.apply_patch({"execution": {key: value}}, author="me")
+    # ...while the fee policy itself can be tuned live
+    await svc.apply_patch({"execution": {"priority_fee_max_trade_pct": 0.3, "send_via_jito": False}}, author="me")
 
 
 async def test_service_load_ignores_invalid_stored_overrides():

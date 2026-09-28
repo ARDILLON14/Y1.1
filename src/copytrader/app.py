@@ -67,6 +67,7 @@ class Application:
         await self._seed_simulated_wallets()
         await c.refresh_tracking()
         recovery = await c.recovery.on_startup()
+        await c.load_fee_history()
         c.signals.start()
         requeued = await c.signals.recover()
         c.notifier.start()
@@ -79,6 +80,9 @@ class Application:
         if c.token_accounts is not None:
             self._spawn(c.token_accounts.run(), "token_accounts")
         self._spawn(c.outcomes.run(), "outcomes")
+        if c.fees.tip_floor is not None:
+            tip_floor = c.fees.tip_floor
+            self._spawn(tip_floor.run(lambda: c.cfg.execution.jito_tip_lamports > 0), "jito_tip_floor")
         self._spawn(self._health_loop(), "health")
         self._spawn(self._housekeeping_loop(), "housekeeping")
         if self.serve_api and cfg.api.enabled:
@@ -197,6 +201,8 @@ class Application:
         if c.token_accounts is not None:
             await c.token_accounts.stop()
         await c.outcomes.stop()
+        if c.fees.tip_floor is not None:
+            await c.fees.tip_floor.stop()
         if self._api_server is not None:
             self._api_server.should_exit = True
         await c.signals.stop()

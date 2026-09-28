@@ -29,6 +29,7 @@ from copytrader.db.base import Database
 from copytrader.db.models import Execution, Order
 from copytrader.db.repositories import EventLogRepo, ExecutionRepo, OrderRepo, SignalRepo
 from copytrader.execution.base import Executor, OrderHandle
+from copytrader.execution.fees import FeePolicy
 from copytrader.execution.mode import ModeController
 from copytrader.observability import metrics
 from copytrader.risk.engine import RiskEngine
@@ -87,6 +88,7 @@ class ExecutionService:
         executors: dict[TradeMode, Executor],
         guard: ExecutionGuard,
         risk: RiskEngine,
+        fees: FeePolicy | None = None,
     ) -> None:
         self.db = db
         self.clock = clock
@@ -95,6 +97,7 @@ class ExecutionService:
         self.executors = executors
         self.guard = guard
         self.risk = risk
+        self.fees = fees
         self.fill_applier: FillApplier | None = None
 
     def executor(self, mode: TradeMode) -> Executor:
@@ -228,6 +231,18 @@ class ExecutionService:
                 )
                 if exec_id is None:
                     return  # fill already applied (recovery/live race): nothing to do
+                if result.network_fee_lamports is not None or result.fee_decision:
+                    order.context = {
+                        **ctx,
+                        "network_fee_lamports": result.network_fee_lamports,
+                        "fee_decision": result.fee_decision,
+                    }
+                    if (
+                        self.fees is not None
+                        and order.mode == TradeMode.LIVE.value
+                        and result.network_fee_lamports is not None
+                    ):
+                        self.fees.tracker.record(result.network_fee_lamports)
                 realized = None
                 if self.fill_applier is not None:
                     realized = await self.fill_applier.apply_fill(s, order, result)

@@ -25,14 +25,14 @@ stop copying wallets whose edge disappears once those are paid.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from copytrader.analysis import stats
 from copytrader.config.models import AppConfig
 from copytrader.core.models import ClosedTrade
-from copytrader.execution.costs import lamports_to_usd, round_trip_cost_lamports
+from copytrader.execution.costs import lamports_to_usd, round_trip_cost_lamports, swap_fee_lamports
 
 MAX_IMPACT = 0.9
 # Only used when no SOL price is available (network costs are denominated in SOL).
@@ -69,10 +69,18 @@ def typical_size_usd(cfg: AppConfig) -> float:
 
 
 def build_params(
-    cfg: AppConfig, *, latency_seconds: float, sol_price_usd: float | None, latency_source: str = "config"
+    cfg: AppConfig,
+    *,
+    latency_seconds: float,
+    sol_price_usd: float | None,
+    latency_source: str = "config",
+    swap_fee: Callable[[float, float], int] | None = None,
 ) -> ReplicationParams:
+    """``swap_fee(size_usd, sol_price)``: expected network cost of one swap (default: static model)."""
     size = cfg.analysis.replication_size_usd or typical_size_usd(cfg)
-    cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg), sol_price_usd or FALLBACK_SOL_PRICE_USD)
+    sol_price = sol_price_usd or FALLBACK_SOL_PRICE_USD
+    fee = swap_fee(size, sol_price) if swap_fee else swap_fee_lamports(cfg, size, sol_price)
+    cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg, fee), sol_price)
     return ReplicationParams(
         latency_seconds=max(0.0, latency_seconds),
         size_usd=size,

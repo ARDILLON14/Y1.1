@@ -20,7 +20,8 @@ from copytrader.core.errors import CopyTraderError, ExecutionError
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
 from copytrader.core.types import OrderStatus, Side, TradeMode
 from copytrader.execution.base import OrderHandle, quote_price_usd, slippage_bps
-from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd, swap_fee_lamports
+from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd
+from copytrader.execution.fees import FeePolicy
 from copytrader.providers.interfaces import QuoteSource, TokenInfoProvider
 from copytrader.resilience.rate_limiter import Priority
 
@@ -29,12 +30,18 @@ class PaperExecutor:
     mode = TradeMode.PAPER
 
     def __init__(
-        self, quotes: QuoteSource, tokens: TokenInfoProvider, clock: Clock, config: Callable[[], AppConfig]
+        self,
+        quotes: QuoteSource,
+        tokens: TokenInfoProvider,
+        clock: Clock,
+        config: Callable[[], AppConfig],
+        fees: FeePolicy | None = None,
     ) -> None:
         self.quotes = quotes
         self.tokens = tokens
         self.clock = clock
         self._config = config
+        self.fees = fees or FeePolicy(config)
 
     async def quote(
         self,
@@ -72,18 +79,21 @@ class PaperExecutor:
                 mode=self.mode,
                 error="slippage simulado supera la tolerancia (la tx fallaría on-chain)",
             )
-        # Same network costs the live transaction would pay (base + priority fee or tip),
-        # plus the token-account rent on buys when empty accounts are not closed/refunded.
-        fee_lamports = swap_fee_lamports(cfg)
-        if req.side is Side.BUY:
-            fee_lamports += entry_rent_lamports(cfg)
-        fees_usd = lamports_to_usd(fee_lamports, sol_price)
         if req.side is Side.BUY:
             qty = out_raw / 10**req.token_decimals
             value = req.amount_in_raw / 1e9 * sol_price
         else:
             qty = req.amount_in_raw / 10**req.token_decimals
             value = out_raw / 1e9 * sol_price
+        # Same network costs the live transaction would pay (base + priority fee or tip, chosen
+        # by the same fee policy), plus the token-account rent on buys when empty accounts are
+        # not closed/refunded.
+        fee = self.fees.decide(
+            purpose=req.purpose, notional_usd=value, sol_price=sol_price, trigger=req.trigger, attempt=req.attempt
+        )
+        network_fee = self.fees.modeled_fee_lamports(fee, value, sol_price)
+        fee_lamports = network_fee + (entry_rent_lamports(cfg) if req.side is Side.BUY else 0)
+        fees_usd = lamports_to_usd(fee_lamports, sol_price)
         fill_price = value / qty if qty > 0 else None
         q_price = quote_price_usd(req, quote, sol_price)
         return ExecutionResult(
@@ -102,4 +112,6 @@ class PaperExecutor:
             price_impact_bps=quote.price_impact_frac * 10_000,
             latency_ms=(time.perf_counter() - started) * 1000,
             executed_at=self.clock.now(),
+            network_fee_lamports=network_fee,
+            fee_decision=fee.to_dict(),
         )

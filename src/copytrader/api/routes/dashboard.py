@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from copytrader.analysis.replication import typical_size_usd
 from copytrader.api import serializers as ser
 from copytrader.api.auth import Session
 from copytrader.api.deps import client_ip, ctx, reauth, session, write_session
@@ -19,9 +20,12 @@ from copytrader.db.repositories import (
     AuditRepo,
     DbConfigStore,
     EquityRepo,
+    ExecutionRepo,
     RiskEventRepo,
     SignalRepo,
 )
+from copytrader.execution.costs import lamports_to_usd
+from copytrader.observability.speed import summary
 from copytrader.preflight import preflight_passed, run_preflight
 
 router = APIRouter(tags=["dashboard"])
@@ -152,6 +156,45 @@ async def system_status(request: Request, _: Session = Depends(session)) -> dict
         "providers_mode": c.cfg.providers.mode,
         "last_cycle": asdict(c.cycle.last_report) if c.cycle.last_report else None,
         "notifications": [ch.name for ch in c.notifier.channels],
+    }
+
+
+@router.get("/system/speed")
+async def system_speed(request: Request, _: Session = Depends(session)) -> dict[str, Any]:
+    """Detection/copy delay, stream and send-route performance, and the fees being paid."""
+    c = ctx(request).container
+    cfg = c.cfg
+    ex = cfg.execution
+    sol = await c.tokens.sol_price()
+    size = typical_size_usd(cfg)
+    async with c.db.session() as s:
+        copy_delays = list(await ExecutionRepo(s).entry_latencies())
+    expected = c.fees.expected_swap_fee_lamports(size, sol)
+    expected_usd = lamports_to_usd(expected, sol) if sol else None
+    jito = ex.jito_tip_lamports > 0
+    tip_floor = c.fees.tip_floor.snapshot() if jito and c.fees.tip_floor is not None else None
+    return {
+        **c.speed.snapshot(),
+        "copy_delay": summary(copy_delays, 2),
+        "fees": {
+            "kind": "jito" if jito else "priority",
+            "typical_size_usd": round(size, 2),
+            "expected_lamports": expected,
+            "expected_usd": None if expected_usd is None else round(expected_usd, 4),
+            "expected_pct_of_trade": None if expected_usd is None else round(expected_usd / size * 100, 3),
+            "observed_lamports": c.fees.observed_fee_lamports(),
+            "observed_samples": len(c.fees.tracker),
+            "min_samples": ex.fee_min_samples,
+            "entry_level": ex.priority_level,
+            "exit_level": ex.exit_priority_level,
+            "max_trade_pct": ex.priority_fee_max_trade_pct,
+            "cap_lamports": ex.jito_tip_lamports if jito else ex.priority_fee_max_lamports,
+            "tip_percentile": ex.jito_tip_percentile if jito else None,
+            "tip_floor": tip_floor,
+        },
+        "routes": None
+        if c.sender is None
+        else {"tipped": c.sender.routes(tipped=True), "untipped": c.sender.routes(tipped=False)},
     }
 
 

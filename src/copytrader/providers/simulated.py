@@ -29,6 +29,7 @@ from copytrader.core.clock import Clock
 from copytrader.core.errors import ProviderError
 from copytrader.core.models import Quote, SwapEvent
 from copytrader.core.types import Side, TxSource
+from copytrader.observability.speed import SpeedStats
 from copytrader.providers.interfaces import MarketData, MintData, RiskData, SwapHandler
 from copytrader.providers.solana.constants import SOL_MINT, TOKEN_2022_PROGRAM, TOKEN_PROGRAM
 from copytrader.resilience.rate_limiter import Priority
@@ -667,6 +668,7 @@ class SimulatedFeed:
         self._latency = detection_latency
         self._pending: list[tuple[datetime, int, SwapEvent]] = []
         self._seq = 0
+        self.speed: SpeedStats | None = None
 
     def set_wallets(self, wallets: set[str]) -> None:
         self._wallets = set(wallets)
@@ -698,6 +700,8 @@ class SimulatedFeed:
                 if ev.wallet not in self._wallets:
                     continue
                 self.m.history.setdefault(ev.wallet, []).append(ev)
+                if self.speed is not None and ev.detection_latency_ms is not None:
+                    self.speed.record_detection("simulated", ev.detection_latency_ms / 1000)
                 await on_swap(ev)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stopped.wait(), timeout=0.25)

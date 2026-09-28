@@ -25,6 +25,10 @@ PROVIDER_LATENCY = Histogram(
 CIRCUIT_STATE = Gauge("ct_circuit_state", "0=closed 1=half_open 2=open", ["breaker"], registry=REGISTRY)
 WS_CONNECTED = Gauge("ct_ws_connected", "WebSocket connected (1/0)", ["stream"], registry=REGISTRY)
 WS_RECONNECTS = Counter("ct_ws_reconnects_total", "WebSocket reconnects", ["stream"], registry=REGISTRY)
+STREAM_FIRST = Counter(
+    "ct_stream_first_total", "Transactions delivered first by each stream", ["stream"], registry=REGISTRY
+)
+TX_SEND = Counter("ct_tx_send_total", "Transaction sends by route", ["route", "outcome"], registry=REGISTRY)
 SWAPS_DETECTED = Counter("ct_swaps_detected_total", "Parsed wallet swaps", ["source"], registry=REGISTRY)
 DETECTION_LATENCY = Histogram(
     "ct_detection_latency_seconds", "Block time -> detection", buckets=_LAT_BUCKETS, registry=REGISTRY

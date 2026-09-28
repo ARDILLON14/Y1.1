@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
 from copytrader.core.errors import ProviderError
-from copytrader.core.types import Side, SignalStatus
+from copytrader.core.types import Side, SignalStatus, TradeMode
 from copytrader.db.models import Signal
 from copytrader.db.repositories import WalletRepo
 from tests.integration.conftest import good_token, live_swap
@@ -72,6 +74,41 @@ async def test_sell_route_passes_for_a_normal_token(container):
     check = _check(sig, "sell_route")
     assert sig.status == SignalStatus.EXECUTED.value and check["passed"]
     assert 0 <= check["value"] < 10
+
+
+async def test_sell_route_is_quoted_with_the_buy_and_reused_for_the_same_token(container, monkeypatch):
+    c = container
+    c.signals.start()
+    mint = good_token(c)
+    paper = c.execution.executors[next(iter(c.execution.executors))]
+    original = paper.quote
+    calls: list[tuple[str, float, float]] = []
+
+    async def slow_quote(input_mint, output_mint, amount_raw, slippage_bps, **kw):
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await asyncio.sleep(0.1)
+        q = await original(input_mint, output_mint, amount_raw, slippage_bps, **kw)
+        calls.append(("sell" if input_mint == mint else "buy", started, loop.time()))
+        return q
+
+    monkeypatch.setattr(paper, "quote", slow_quote)
+    sig = await _copy(c, "par", mint=mint)
+    assert sig.status == SignalStatus.EXECUTED.value and _check(sig, "sell_route")["passed"]
+    buy = next(call for call in calls if call[0] == "buy")
+    sell = next(call for call in calls if call[0] == "sell")
+    assert sell[1] < buy[2]  # the exit was quoted while the buy quote was still running
+    # a recent pass for this token (similar size) is reused: no new sell quote
+    calls.clear()
+    checks: list = []
+    quote = await original(c.cfg.execution.quote_mint, mint, 50_000_000, 150)
+    ctx = SimpleNamespace(swap=SimpleNamespace(token_mint=mint))
+    await c.pipeline._check_sell_route(ctx, quote, checks, TradeMode.PAPER)
+    assert not calls and checks[-1].passed and "verificado hace" in checks[-1].message
+    # ...but not once the cache time is over
+    c.pipeline._sell_ok[mint] = (*c.pipeline._sell_ok[mint][:2], 0.0)
+    await c.pipeline._check_sell_route(ctx, quote, checks, TradeMode.PAPER)
+    assert [call[0] for call in calls] == ["sell"]
 
 
 async def _other_wallet(c, exclude_id: int, status: str):

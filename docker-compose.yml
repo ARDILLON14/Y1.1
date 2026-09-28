@@ -58,6 +58,9 @@ services:
       - database_url
       - solana_rpc_url
       - solana_ws_url
+      - solana_ws_url_backup
+      - solana_send_rpc_urls
+      - jito_auth_uuid
       - helius_api_key
       - jupiter_api_key
       - telegram_bot_token
@@ -143,6 +146,9 @@ secrets:
   database_url: {file: ./secrets/database_url}
   solana_rpc_url: {file: ./secrets/solana_rpc_url}
   solana_ws_url: {file: ./secrets/solana_ws_url}
+  solana_ws_url_backup: {file: ./secrets/solana_ws_url_backup}
+  solana_send_rpc_urls: {file: ./secrets/solana_send_rpc_urls}
+  jito_auth_uuid: {file: ./secrets/jito_auth_uuid}
   helius_api_key: {file: ./secrets/helius_api_key}
   jupiter_api_key: {file: ./secrets/jupiter_api_key}
   telegram_bot_token: {file: ./secrets/telegram_bot_token}

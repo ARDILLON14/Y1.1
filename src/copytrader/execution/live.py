@@ -29,7 +29,9 @@ from copytrader.core.errors import CopyTraderError, ExecutionError, SecurityErro
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
 from copytrader.core.types import OrderPurpose, OrderStatus, Side, TradeMode
 from copytrader.execution.base import OrderHandle, quote_price_usd, slippage_bps
-from copytrader.execution.costs import lamports_to_usd
+from copytrader.execution.costs import LAMPORTS_PER_SOL, lamports_to_usd
+from copytrader.execution.fees import FeePolicy
+from copytrader.execution.sender import TransactionSender
 from copytrader.providers.interfaces import ChainClient, QuoteSource, SwapTxBuilder, TokenInfoProvider
 from copytrader.providers.solana.constants import TOKEN_ACCOUNT_RENT_LAMPORTS
 from copytrader.providers.solana.parser import created_token_accounts, parse_swaps
@@ -53,6 +55,8 @@ class LiveExecutor:
         tokens: TokenInfoProvider,
         clock: Clock,
         config: Callable[[], AppConfig],
+        fees: FeePolicy | None = None,
+        sender: TransactionSender | None = None,
     ) -> None:
         self.quotes = quotes
         self.builder = builder
@@ -61,6 +65,8 @@ class LiveExecutor:
         self.tokens = tokens
         self.clock = clock
         self._config = config
+        self.fees = fees or FeePolicy(config)
+        self.sender = sender  # None: main RPC only
 
     @property
     def wallet(self) -> str:
@@ -123,13 +129,20 @@ class LiveExecutor:
         await handle.mark(
             OrderStatus.QUOTED, expected_out_raw=quote.out_amount_raw, min_out_raw=quote.min_out_amount_raw
         )
+        fee = self.fees.decide(
+            purpose=req.purpose,
+            notional_usd=req.notional_usd,
+            sol_price=sol_price,
+            trigger=req.trigger,
+            attempt=req.attempt,
+        )
         try:
             built = await self.builder.build_swap(
                 quote,
                 self.wallet,
-                priority_max_lamports=cfg.execution.priority_fee_max_lamports,
-                priority_level=cfg.execution.priority_level,
-                jito_tip_lamports=cfg.execution.jito_tip_lamports,
+                priority_max_lamports=fee.priority_max_lamports,
+                priority_level=fee.priority_level,
+                jito_tip_lamports=fee.jito_tip_lamports,
             )
         except CopyTraderError as exc:
             raise ExecutionError(f"no se pudo construir la transacción: {exc}", retryable=True) from exc
@@ -150,11 +163,19 @@ class LiveExecutor:
             OrderStatus.SIGNED, tx_signature=signed.signature, last_valid_block_height=built.last_valid_block_height
         )
         result = await self.send_and_confirm(
-            handle, req, signed.tx_bytes, signed.signature, built.last_valid_block_height, sol_price
+            handle,
+            req,
+            signed.tx_bytes,
+            signed.signature,
+            built.last_valid_block_height,
+            sol_price,
+            tipped=fee.jito_tip_lamports > 0,
+            urgent=fee.urgent,
         )
         result.quote_price_usd = quote_price_usd(req, quote, sol_price)
         result.price_impact_bps = quote.price_impact_frac * 10_000
         result.latency_ms = (time.perf_counter() - started) * 1000
+        result.fee_decision = fee.to_dict()
         return result
 
     async def send_and_confirm(
@@ -165,6 +186,9 @@ class LiveExecutor:
         signature: str,
         last_valid_block_height: int,
         sol_price: float,
+        *,
+        tipped: bool = False,
+        urgent: bool = False,
     ) -> ExecutionResult:
         cfg = self._config().execution
         deadline = time.monotonic() + cfg.confirm_timeout_seconds
@@ -174,7 +198,12 @@ class LiveExecutor:
             now = time.monotonic()
             if now - last_send >= cfg.rebroadcast_interval_ms / 1000:
                 try:
-                    await self.chain.send_raw_transaction(tx_bytes, skip_preflight=cfg.skip_preflight)
+                    if self.sender is not None:
+                        await self.sender.send(
+                            tx_bytes, tipped=tipped, urgent=urgent, skip_preflight=cfg.skip_preflight
+                        )
+                    else:
+                        await self.chain.send_raw_transaction(tx_bytes, skip_preflight=cfg.skip_preflight)
                 except CopyTraderError as exc:
                     log.warning("send_failed_will_retry", signature=signature, error=str(exc))
                 last_send = now
@@ -260,6 +289,7 @@ class LiveExecutor:
             raise ExecutionError(f"no se encontró el swap del token en la tx {signature}")
         s = swaps[0]
         fee_usd = s.fee_sol * sol_price
+        network_fee = round(s.fee_sol * LAMPORTS_PER_SOL)
         cfg = self._config()
         if (
             req.side is Side.BUY
@@ -287,4 +317,5 @@ class LiveExecutor:
             fees_usd=fee_usd,
             slippage_bps=slippage_bps(req.side, fill_price, req.theoretical_price_usd),
             executed_at=s.block_time,
+            network_fee_lamports=network_fee,
         )

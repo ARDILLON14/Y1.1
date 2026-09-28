@@ -227,7 +227,7 @@ de API, para pruebas y para aprender a usar el dashboard.
 │   ├── signals/       # Signal Detection Engine
 │   ├── pipeline/      # Copy pipeline (12 pasos) + explicaciones
 │   ├── risk/          # Risk Engine, sizing, límites por nivel, estado de PnL
-│   ├── execution/     # paper, live, fees, recuperación
+│   ├── execution/     # paper, live, costes y comisiones, rutas de envío, recuperación
 │   ├── positions/     # Position Manager + estrategias de salida
 │   ├── alerts/        # AlertService
 │   ├── notifications/ # Telegram, Discord, formato
@@ -407,15 +407,21 @@ wallets ni DEX.
   1. `client_order_id` determinista (hash de señal + propósito) → `INSERT` 🔒.
   2. Cotización con `slippageBps` y `restrictIntermediateTokens`; validación de
      *price impact* y `minOutAmount`.
-  3. `POST /swap` con `dynamicComputeUnitLimit` y prioridad con tope.
+  3. `POST /swap` con `dynamicComputeUnitLimit` y la prioridad que decide la
+     política de comisiones (`execution/fees.py`): nivel según la urgencia
+     (entrada, salida rutinaria o de protección, reintento), tope en % del
+     tamaño y propina de Jito según el mercado.
   4. Verificación local de la transacción (pagador, programas permitidos,
      transferencias) y firma en el **Signer** (segunda verificación independiente).
   5. **Se persiste la firma y `lastValidBlockHeight` antes de enviar.** En Solana
      la firma es el id de la transacción: tras un reinicio se consulta su estado;
      si la altura de bloque supera `lastValidBlockHeight` y no aterrizó, es
      imposible que aterrice ⇒ se marca expirada sin riesgo de duplicado.
-  6. Envío con `maxRetries=0` y reenvío propio cada X ms hasta confirmación o expiración.
-  7. Fill real a partir de los balances de la tx confirmada.
+  6. Envío con `maxRetries=0` por todas las rutas activas a la vez
+     (`execution/sender.py`: RPC principal, RPC extra, block engine de Jito) y
+     reenvío propio cada X ms hasta confirmación o expiración.
+  7. Fill real a partir de los balances de la tx confirmada, incluida la
+     comisión pagada, que alimenta el modelo de costes.
 * **Recuperación al arrancar** (`execution/recovery.py`): reconciliación de
   órdenes en vuelo, de posiciones contra balances on‑chain (live) y alerta ante
   discrepancias (activa kill switch global si es grave).

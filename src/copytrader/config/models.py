@@ -57,12 +57,21 @@ class SolanaProviderSection(Section):
     rpc_ws_url: str = "wss://api.mainnet-beta.solana.com"
     stream: Literal["logs_subscribe", "helius_transaction_subscribe"] = "logs_subscribe"
     commitment: Literal["processed", "confirmed", "finalized"] = "confirmed"
+    # Commitment of the real-time stream only (None = ``commitment``). "processed" detects
+    # ~0.5-1 s earlier but a small share of those transactions never confirm; it only helps
+    # with helius_transaction_subscribe (logsSubscribe still has to fetch a confirmed tx).
+    stream_commitment: Literal["processed", "confirmed"] | None = None
+    # Second stream running in parallel: each transaction is handled when the FIRST stream
+    # delivers it. Its URL: secret SOLANA_WS_URL_BACKUP, else ``backup_ws_url``, else the main one.
+    backup_stream: Literal["none", "logs_subscribe", "helius_transaction_subscribe"] = "none"
+    backup_ws_url: str | None = None
     max_subscriptions_per_connection: int = Field(100, ge=1, le=1000)
     ws_ping_interval_seconds: float = Field(20.0, gt=0)
     ws_stale_timeout_seconds: float = Field(180.0, gt=0)
     reconnect_max_backoff_seconds: float = Field(60.0, gt=0)
-    get_transaction_retries: int = Field(8, ge=1, le=30)
-    get_transaction_retry_delay_ms: int = Field(250, ge=50)
+    get_transaction_retries: int = Field(12, ge=1, le=30)
+    # first wait between getTransaction attempts; it grows x1.6 per attempt up to 1 s
+    get_transaction_retry_delay_ms: int = Field(100, ge=20)
     catchup_on_reconnect: bool = True
     reconcile_poll_interval_seconds: int = Field(300, ge=30)
     backfill_max_signatures_per_wallet: int = Field(1000, ge=10, le=100_000)
@@ -423,6 +432,33 @@ class ExecutionSection(Section):
     # Close empty token accounts after a position is closed to recover their rent (~0.002 SOL each).
     close_empty_token_accounts: bool = True
     close_accounts_interval_seconds: float = Field(120.0, ge=30)
+    # --- dynamic fees (execution/fees.py)
+    # Routine exits (take profit, time limit). Protective exits (stop loss, trailing, emergency,
+    # kill switch, source sold, manual) and retried exits always use veryHigh and the full cap.
+    exit_priority_level: Literal["medium", "high", "veryHigh"] = "high"
+    # Priority fee (or Jito tip) of entries and routine exits: at most this % of the trade value,
+    # never below min_priority_fee_lamports / min_jito_tip_lamports. None = only the absolute cap.
+    priority_fee_max_trade_pct: float | None = Field(0.5, gt=0, le=10)
+    min_priority_fee_lamports: int = Field(10_000, ge=0)
+    # Jito tip = recent landed-tip percentile (None = always jito_tip_lamports), between
+    # min_jito_tip_lamports and jito_tip_lamports (the maximum).
+    jito_tip_percentile: Literal[25, 50, 75, 95, 99] | None = 50
+    min_jito_tip_lamports: int = Field(1_000, ge=1_000)
+    jito_tip_floor_url: str = "https://bundles.jito.wtf/api/v1/bundles/tip_floor"
+    # Fees actually paid: after N live swaps their median replaces the cost-model assumptions.
+    fee_min_samples: int = Field(5, ge=1)
+    fee_samples_window: int = Field(50, ge=5, le=1000)
+    # --- sending routes (execution/sender.py)
+    # Also send through Jito's block engine (needs jito_tip_lamports > 0). jito_only: ONLY through
+    # Jito, as bundle-only (protection against sandwiches; lands only with Jito validators).
+    send_via_jito: bool = False
+    jito_only: bool = False
+    jito_block_engine_urls: list[str] = Field(
+        default_factory=lambda: ["https://mainnet.block-engine.jito.wtf/api/v1/transactions"], min_length=1
+    )
+    # Extra RPC endpoints that also receive each transaction (e.g. a staked "sender" endpoint).
+    # URLs with API keys go in the secret SOLANA_SEND_RPC_URLS (comma-separated), not here.
+    extra_send_urls: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _expected_fee_within_max(self) -> ExecutionSection:
@@ -431,6 +467,12 @@ class ExecutionSection(Section):
             and self.expected_priority_fee_lamports > self.priority_fee_max_lamports
         ):
             raise ValueError("execution.expected_priority_fee_lamports cannot exceed priority_fee_max_lamports")
+        if self.min_priority_fee_lamports > self.priority_fee_max_lamports:
+            raise ValueError("execution.min_priority_fee_lamports cannot exceed priority_fee_max_lamports")
+        if self.jito_tip_lamports > 0 and self.min_jito_tip_lamports > self.jito_tip_lamports:
+            raise ValueError("execution.min_jito_tip_lamports cannot exceed jito_tip_lamports")
+        if (self.send_via_jito or self.jito_only) and self.jito_tip_lamports < 1_000:
+            raise ValueError("sending through Jito needs execution.jito_tip_lamports >= 1000 (Jito's minimum tip)")
         return self
 
 
@@ -529,6 +571,8 @@ class FiltersSection(Section):
     # Before buying, quote the sale of what we would get: no route / too lossy round trip = don't buy.
     check_sell_route: bool = True
     max_round_trip_quote_loss_pct: float = Field(10.0, gt=0, le=50)
+    # a token that passed recently (with a similar or larger size) is not quoted again (0 = always quote)
+    sell_route_cache_seconds: float = Field(300.0, ge=0)
     # Market regime (SOL 24 h move): size multipliers (≤ 1) and regimes where nothing is copied.
     regime_size_multipliers: dict[str, float] = Field(default_factory=lambda: {"extreme_down": 0.5, "extreme_up": 0.75})
     block_regimes: list[str] = Field(default_factory=list)

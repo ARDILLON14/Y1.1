@@ -95,6 +95,19 @@ puntos básicos (100 bps = 1 %), `*_seconds`/`*_minutes` tiempo.
 - `solana.stream`: `logs_subscribe` (cualquier RPC; una suscripción por wallet
   + `getTransaction`) o `helius_transaction_subscribe` (la transacción llega
   completa en el evento: menos latencia y menos llamadas).
+- `solana.backup_stream`: un segundo stream en paralelo (de otro proveedor si
+  pones su URL en el secreto `SOLANA_WS_URL_BACKUP`). Cada transacción se
+  procesa en cuanto la entrega el **primero**; si el más lento trae la
+  transacción completa mientras el otro aún la descarga, se usa la suya. Si
+  el respaldo cae, el sistema queda *degradado*, no caído. La página
+  *Sistema* muestra qué stream llega antes y con cuánta ventaja.
+- `solana.stream_commitment`: `processed` detecta ~0,5-1 s antes con
+  `helius_transaction_subscribe`, pero una pequeña parte de esas
+  transacciones nunca se confirma (copiarías algo que no llegó a pasar). Por
+  defecto se usa `confirmed`.
+- `get_transaction_retries` / `get_transaction_retry_delay_ms`: con
+  `logs_subscribe` la transacción se descarga aparte; el primer reintento
+  llega a los 100 ms y la espera crece ×1,6 hasta 1 s.
 - `catchup_on_reconnect` y `reconcile_poll_interval_seconds`: tras una
   desconexión se recuperan las operaciones perdidas; la reconciliación
   periódica es una red de seguridad, no el mecanismo principal.
@@ -223,6 +236,42 @@ reconciliación de saldos. Además:
 - `close_empty_token_accounts`: cierra las cuentas de token vacías tras vender
   y recupera su alquiler (ver [§6](#6-costes-de-red)).
 
+**Comisiones dinámicas.** Cada transacción decide cuánta prioridad paga:
+
+| Orden | Nivel | Tope |
+|---|---|---|
+| Entrada | `priority_level` | `priority_fee_max_trade_pct` del tamaño (0,5 %), mín. `min_priority_fee_lamports`, máx. `priority_fee_max_lamports` |
+| Salida rutinaria (take profit, tiempo máximo) | `exit_priority_level` | igual que la entrada |
+| Salida de protección (stop, trailing, emergencia, kill switch, venta del origen, manual) o cualquier salida que ya falló una vez | `veryHigh` | el tope completo: que aterrice importa más que la comisión |
+
+Jupiter paga su estimación del mercado para ese nivel, como mucho el tope.
+Con `jito_tip_lamports > 0` se paga una **propina de Jito** en lugar de
+priority fee: el percentil `jito_tip_percentile` de las propinas que están
+aterrizando (API pública de Jito, cada 30 s), entre `min_jito_tip_lamports`
+y `jito_tip_lamports`, y con el mismo tope por tamaño.
+
+Las comisiones que pagan tus operaciones reales se guardan en cada orden.
+Con `fee_min_samples` operaciones, su mediana sustituye a
+`expected_priority_fee_lamports` en el modelo de costes (filtro de coste,
+valor esperado, paper y replicación).
+
+**Rutas de envío.** La transacción firmada sale a la vez por todas las rutas
+activas y la primera que la acepta desbloquea la confirmación (la firma es la
+misma: solo puede ejecutarse una vez):
+- el RPC principal;
+- `extra_send_urls` y el secreto `SOLANA_SEND_RPC_URLS` (p. ej. un endpoint
+  de envío con conexión *staked*);
+- `send_via_jito`: el block engine de Jito (`jito_block_engine_urls`), solo
+  para transacciones con propina;
+- `jito_only`: **solo** Jito y en modo *bundle-only*. Protege de sándwiches
+  (nadie ve la transacción antes de que entre en un bloque), pero solo
+  aterriza cuando el líder es un validador de Jito, así que puede tardar
+  algo más. Las salidas de protección (stop, trailing, emergencia…) no lo
+  aplican: salen por todas las rutas, porque que aterricen importa más.
+
+Las URLs de envío y de propinas solo se cambian en el YAML (claves
+bloqueadas): deciden a dónde viajan tus transacciones firmadas.
+
 ### `paper`
 Latencia simulada, slippage extra, comisión base por transacción y si se usan
 cotizaciones reales de Jupiter (recomendado: el paper trading solo es útil si
@@ -280,6 +329,9 @@ Cada uno aparece en la explicación de la decisión:
   perdería más de `max_round_trip_quote_loss_pct`, no se compra. Detecta
   tokens sin salida o con liquidez de venta muy pobre (no sustituye a los
   filtros de autoridades y extensiones de Token-2022, que ya se aplican).
+  La venta se cotiza **a la vez** que la compra (con la cantidad esperada) y
+  un token que pasó hace menos de `sell_route_cache_seconds` con un tamaño
+  similar no se vuelve a cotizar.
 - **Régimen de mercado** (movimiento de SOL en 24 h, calculado en cada
   evaluación): `regime_size_multipliers` reduce el tamaño en regímenes
   violentos (×0,5 en caída extrema por defecto) y `block_regimes` detiene las
@@ -319,13 +371,15 @@ backtest y en el filtro `risk.max_round_trip_cost_pct`:
 | Coste | Cuándo | Valor |
 |---|---|---|
 | Comisión base | cada transacción | 5.000 lamports (`paper.network_fee_sol`) |
-| Priority fee **o** tip de Jito | cada transacción (nunca ambos) | `execution.expected_priority_fee_lamports` (o el tope `priority_fee_max_lamports`) / `jito_tip_lamports` |
+| Priority fee **o** tip de Jito | cada transacción (nunca ambos) | la mediana real de tus últimas operaciones; si aún no hay suficientes, `execution.expected_priority_fee_lamports`, la propina de mercado de Jito o el tope. Siempre ≤ `priority_fee_max_trade_pct` del tamaño |
 | Alquiler de la cuenta del token | al comprar un token nuevo | ~0,00204 SOL; se **recupera** al cerrar la cuenta vacía tras vender (`close_empty_token_accounts: true`) y solo es coste si desactivas el cierre |
 
-Con los valores por defecto (tope de priority fee de 0,001 SOL) una compra y
-su venta cuestan ~0,002 SOL: con SOL a 200 USD son ~0,40 USD, un 4 % de una
-operación de 10 USD y un 2 % de una de 20 USD. El filtro rechaza por defecto
-las que superen el 3 %.
+Sin tope por tamaño, el tope de priority fee de 0,001 SOL haría que una
+compra y su venta costasen ~0,002 SOL: con SOL a 200 USD, ~0,40 USD, un 4 %
+de una operación de 10 USD. Con `priority_fee_max_trade_pct: 0.5` cada
+transacción paga como mucho el 0,5 % del tamaño (~1 % ida y vuelta), a cambio
+de menos prioridad en operaciones pequeñas cuando la red está congestionada.
+El filtro rechaza por defecto las que superen el 3 %.
 
 El cierre de cuentas vacías solo envía transacciones con el trading real
 armado, nunca toca cuentas con saldo, con posición abierta u orden en vuelo, ni
@@ -346,6 +400,9 @@ API, y se enmascaran en logs y notificaciones. Fuentes, por prioridad:
 |---|---|
 | `DATABASE_URL` | conexión a la base de datos |
 | `SOLANA_RPC_URL`, `SOLANA_WS_URL` | RPC con API key (tienen prioridad sobre las URLs públicas del YAML) |
+| `SOLANA_WS_URL_BACKUP` | stream de respaldo (`providers.solana.backup_stream`), mejor de otro proveedor |
+| `SOLANA_SEND_RPC_URLS` | RPC extra que también reciben cada transacción, separados por comas |
+| `JITO_AUTH_UUID` | opcional: cabecera `x-jito-auth` para límites de envío más altos |
 | `HELIUS_API_KEY`, `JUPITER_API_KEY` | opcionales |
 | `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL` | notificaciones |
 | `SIGNER_HMAC_KEY` (+ `SIGNER_HMAC_KEY_PREVIOUS` al rotar) | autenticación app ↔ firmador |

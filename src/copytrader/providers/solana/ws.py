@@ -41,6 +41,7 @@ class StreamNotice:
     received_at: datetime
     wallet: str | None = None
     transaction: dict[str, Any] | None = None
+    stream: str = ""  # name of the stream that delivered it
 
 
 NoticeSink = Callable[[StreamNotice], Awaitable[None]]
@@ -73,10 +74,13 @@ class ReconnectingStream:
         self,
         settings: StreamSettings,
         *,
+        name: str | None = None,
         on_status: StatusListener | None = None,
         on_reconnect: Callable[[], Awaitable[None]] | None = None,
         connect: Callable[..., Any] = websockets.connect,
     ) -> None:
+        if name:
+            self.name = name  # distinguishes a backup stream of the same type
         self.settings = settings
         self._on_status = on_status
         self._on_reconnect = on_reconnect
@@ -275,6 +279,7 @@ class LogsSubscribeStream(ReconnectingStream):
                 slot=int((result.get("context") or {}).get("slot") or 0),
                 received_at=utcnow(),
                 wallet=notified,
+                stream=self.name,
             )
         )
 
@@ -356,6 +361,10 @@ class HeliusTransactionStream(ReconnectingStream):
             return
         await sink(
             StreamNotice(
-                signature=signature, slot=int(result.get("slot") or 0), received_at=utcnow(), transaction=result
+                signature=signature,
+                slot=int(result.get("slot") or 0),
+                received_at=utcnow(),
+                transaction=result,
+                stream=self.name,
             )
         )

@@ -190,10 +190,11 @@ class Backtester:
         last_px: dict[str, float] = {}
         sol_px = next((ev.sol_price_usd for ev, _ in events if ev.sol_price_usd), FALLBACK_SOL_PRICE_USD)
 
-        def fee(buy: bool) -> float:
+        def fee(buy: bool, value_usd: float) -> float:
             if params.fee_usd_per_trade is not None:
                 return params.fee_usd_per_trade
-            lamports = swap_fee_lamports(cfg) + (entry_rent_lamports(cfg) if buy else 0)
+            # same size-capped priority fee as live (history has no "observed" fees)
+            lamports = swap_fee_lamports(cfg, value_usd, sol_px) + (entry_rent_lamports(cfg) if buy else 0)
             return lamports_to_usd(lamports, sol_px)
 
         step = timedelta(minutes=params.price_step_minutes)
@@ -204,7 +205,7 @@ class Backtester:
 
         def close(pos: _Pos, fraction: float, price: float, when: datetime, reason: str) -> None:
             qty = pos.qty * fraction
-            exit_fee = fee(buy=False)
+            exit_fee = fee(False, qty * price)
             proceeds = qty * price * (1 - params.exit_slippage_pct / 100) - exit_fee
             cost = pos.cost * fraction
             book.cash += proceeds
@@ -301,7 +302,7 @@ class Backtester:
             if ev.liquidity_usd:
                 impact = params.impact_coefficient * size.size_usd / (ev.liquidity_usd / 2 + size.size_usd)
             price = base * (1 + params.entry_slippage_pct / 100 + impact)
-            entry_fee = fee(buy=True)
+            entry_fee = fee(True, size.size_usd)
             book.cash -= size.size_usd + entry_fee
             book.fees += entry_fee
             book.positions[ev.token_mint] = _Pos(

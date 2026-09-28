@@ -247,6 +247,36 @@ make up-live
 para instalaciones sin Docker, pero pierde el aislamiento; evítalo con dinero
 significativo.
 
+### Ir más rápido (opcional)
+
+La velocidad importa porque cada segundo de retraso es precio que ya se
+movió. Mide primero y cambia después: la tarjeta *Sistema → Velocidad y
+comisiones* muestra el retraso de copia (operación de la wallet → tu
+ejecución), la detección por stream, qué rutas aceptan tus transacciones y
+lo que pagas en comisiones.
+
+1. **Stream más rápido**: `providers.solana.stream: helius_transaction_subscribe`
+   (con RPC de Helius) evita descargar cada transacción aparte.
+2. **Stream de respaldo**: `backup_stream` con la URL de **otro** proveedor en
+   `SOLANA_WS_URL_BACKUP`. Gana el que avisa antes; si uno cae, el otro sigue.
+3. **Envío por varias rutas**: `extra_send_urls` / `SOLANA_SEND_RPC_URLS` y,
+   con propina, `send_via_jito: true` y `jito_tip_lamports` (el máximo; la
+   propina real sigue al mercado). Sube también `SIGNER_MAX_TIP_LAMPORTS` del
+   firmador hasta ese máximo, o rechazará las transacciones con propina.
+4. **Protección contra sándwiches**: `jito_only: true` (solo Jito, bundle-only).
+   Útil si ves slippage real peor que el cotizado; a cambio, puede tardar algo
+   más en entrar. Los stops y demás salidas de protección salen siempre por
+   todas las rutas.
+
+Pagar más prioridad no convierte en rentable una wallet que no lo es:
+`priority_fee_max_trade_pct` evita que las comisiones se coman operaciones
+pequeñas, y el filtro de coste y el de valor esperado usan lo que de verdad
+estás pagando.
+
+Tras actualizar una instalación con Docker, ejecuta otra vez
+`scripts/init-secrets.sh`: crea vacíos los secretos opcionales nuevos y no
+toca los que ya existen.
+
 ## 6. Activar el trading real
 
 Tres compuertas independientes, todas necesarias:
@@ -308,8 +338,8 @@ o activar un kill switch.
 
 - Wallets que pasan a OBSERVAR por deterioro (el pasado no garantiza nada).
 - Motivos de rechazo más frecuentes (*Señales* filtrando por rechazadas): si
-  casi todo caduca por latencia, necesitas un RPC/stream más rápido, no
-  relajar límites.
+  casi todo caduca por latencia, necesitas un RPC/stream más rápido (ver
+  [Ir más rápido](#ir-más-rápido-opcional)), no relajar límites.
 - *Análisis*: filtros marcados "Revisar" con muestra suficiente, wallets cuyo
   resultado real queda muy por debajo del estimado, y qué parte del resultado
   se va en comisiones. Las wallets que pierden al copiarlas pasan solas a

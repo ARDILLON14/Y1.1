@@ -21,6 +21,7 @@ from copytrader.core.types import OrderPurpose, OrderStatus, PositionStatus, Sid
 from copytrader.db.models import Execution, Order, Position
 from copytrader.db.repositories import EventLogRepo, SignalRepo, WalletRepo
 from copytrader.execution.live import LiveExecutor
+from copytrader.execution.sender import TransactionSender
 from copytrader.providers.interfaces import BuiltTransaction
 from copytrader.providers.solana.constants import SOL_MINT, TOKEN_ACCOUNT_RENT_LAMPORTS
 from copytrader.security.signer import SignedTransaction
@@ -40,6 +41,7 @@ class FakeChain:
         self.orders_seen_signed: list[bool] = []
         self.last_in = 0
         self.last_out = 0
+        self.fees: list[dict[str, Any]] = []  # fee arguments given to the swap builder
 
     async def send_raw_transaction(self, tx_bytes: bytes, *, skip_preflight: bool = True) -> str:
         sig = tx_bytes.decode().split("|")[1]
@@ -103,8 +105,9 @@ class FakeBuilder:
     def __init__(self, chain: FakeChain) -> None:
         self.chain = chain
 
-    async def build_swap(self, quote: Any, user: str, **_: Any) -> BuiltTransaction:
+    async def build_swap(self, quote: Any, user: str, **fee: Any) -> BuiltTransaction:
         self.chain.last_in, self.chain.last_out = quote.in_amount_raw, quote.out_amount_raw
+        self.chain.fees.append(fee)
         return BuiltTransaction(tx_bytes=b"unsigned", last_valid_block_height=1100)
 
 
@@ -137,6 +140,7 @@ async def live(tmp_path, template_db):
         tokens=c.tokens,
         clock=c.clock,
         config=c.get_cfg,
+        fees=c.fees,
     )
     c.execution.executors[TradeMode.LIVE] = executor
     c.recovery.live = executor
@@ -184,6 +188,31 @@ async def test_confirmed_live_entry_persists_signature_before_send(live):
     again = await c.execution.execute(_entry(c, mint, "k1"), context={})
     assert again.success and len(chain.sends) == sends
     assert await _count(c, Execution) == 1
+
+
+async def test_live_fee_is_sized_recorded_and_feeds_the_cost_model(live):
+    c, chain, mint = live
+    chain.status = "confirmed"
+    sol = c.providers.simulated_market.sol_price()
+    assert len(c.fees.tracker) == 0
+    result = await c.execution.execute(_entry(c, mint, "fee1"), context={"decimals": 6, "exit_mode": "protected"})
+    assert result.success, result.error
+    # 20 USD entry: priority fee capped at 0.5 % of the trade, not the absolute 1,000,000 lamports
+    fee = chain.fees[-1]
+    assert fee["priority_level"] == "veryHigh" and fee["jito_tip_lamports"] == 0
+    assert fee["priority_max_lamports"] == pytest.approx(int(20 * 0.005 / sol * 1e9), abs=1)
+    async with c.db.session() as s:
+        order = (await s.execute(select(Order))).scalar_one()
+    assert order.context["network_fee_lamports"] == 5_000  # what the chain charged (fake tx fee)
+    assert order.context["fee_decision"]["source"] == "size_cap"
+    # the real fee is tracked and, with enough samples, replaces the assumptions of the cost model
+    assert len(c.fees.tracker) == 1
+    c.fees.tracker.load([5_000] * 10)
+    assert c.fees.expected_swap_fee_lamports(20.0, sol) == 5_000
+    # ...and is loaded back from the orders after a restart
+    c.fees.tracker = type(c.fees.tracker)()
+    await c.load_fee_history()
+    assert len(c.fees.tracker) == 1
 
 
 async def test_timeout_keeps_order_pending_then_recovery_applies_fill_once(live):
@@ -301,3 +330,52 @@ async def test_guard_blocks_live_when_disarmed(live):
     result = await c.execution.execute(_entry(c, mint, "disarmed"), context={})
     assert not result.success and "no permitido" in result.error
     assert chain.sends == []
+
+
+class FakeJito:
+    def __init__(self) -> None:
+        self.sent: list[tuple[bytes, bool]] = []
+
+    async def send(self, tx_bytes: bytes, *, bundle_only: bool = False) -> str:
+        self.sent.append((tx_bytes, bundle_only))
+        return "ok"
+
+
+async def test_tipped_live_entry_is_also_sent_through_jito(tmp_path, template_db):
+    c = await seeded_container(
+        tmp_path,
+        template_db,
+        {
+            "execution": {
+                "wallet_public_key": WALLET,
+                "confirm_timeout_seconds": 1.0,
+                "rebroadcast_interval_ms": 200,
+                "jito_tip_lamports": 100_000,
+                "send_via_jito": True,
+            }
+        },
+    )
+    try:
+        mint = good_token(c)
+        chain = FakeChain(c, mint)
+        jito = FakeJito()
+        c.execution.executors[TradeMode.LIVE] = LiveExecutor(
+            quotes=c.providers.quotes,
+            builder=FakeBuilder(chain),
+            chain=chain,
+            signer=FakeSigner(),
+            tokens=c.tokens,
+            clock=c.clock,
+            config=c.get_cfg,
+            fees=c.fees,
+            sender=TransactionSender(c.get_cfg, chain, jito=[jito]),  # type: ignore[list-item]
+        )
+        c.mode.live_block_reason = lambda: None  # type: ignore[method-assign]
+        chain.status = "confirmed"
+        result = await c.execution.execute(_entry(c, mint, "jito1"), context={"decimals": 6, "exit_mode": "protected"})
+        assert result.success, result.error
+        fee = chain.fees[-1]
+        assert fee["jito_tip_lamports"] > 0 and fee["priority_max_lamports"] == 0
+        assert chain.sends and jito.sent and jito.sent[0][1] is False  # both routes, not bundle-only
+    finally:
+        await c.aclose()
