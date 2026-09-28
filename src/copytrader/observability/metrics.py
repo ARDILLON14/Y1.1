@@ -48,6 +48,9 @@ END_TO_END_LATENCY = Histogram(
 )
 SIGNALS = Counter("ct_signals_total", "Signals by action/status", ["action", "status"], registry=REGISTRY)
 DECISIONS = Counter("ct_decisions_total", "Copy decisions", ["result", "reason"], registry=REGISTRY)
+RENT_RECOVERED = Counter(
+    "ct_token_account_rent_recovered_sol_total", "SOL recovered by closing empty token accounts", registry=REGISTRY
+)
 ORDERS = Counter("ct_orders_total", "Orders", ["mode", "purpose", "status"], registry=REGISTRY)
 ERRORS = Counter("ct_errors_total", "Errors by component", ["component"], registry=REGISTRY)
 OPEN_POSITIONS = Gauge("ct_open_positions", "Open positions", ["mode"], registry=REGISTRY)

@@ -36,11 +36,15 @@ from copytrader.core.models import SwapEvent
 from copytrader.core.types import ExitMode, ListType, Side
 from copytrader.detection.detector import SuspicionDetector
 from copytrader.detection.rules import CoordinationIndex, DetectionContext
+from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd, swap_fee_lamports
 from copytrader.positions.exits import PositionView, evaluate_exit, source_sell_fraction
 from copytrader.risk.sizing import SizingInput, compute_size
 from copytrader.scoring.scorer import ScoringEngine
 from copytrader.scoring.status import decide_status
 from copytrader.selection.selector import Candidate, select_wallets
+
+# Only used when no event carries a SOL price (network costs are denominated in SOL).
+FALLBACK_SOL_PRICE_USD = 150.0
 
 
 @dataclass
@@ -53,7 +57,7 @@ class BacktestParams:
     latency_seconds: float = 3.0
     entry_slippage_pct: float = 2.0
     exit_slippage_pct: float = 2.0
-    fee_usd_per_trade: float = 0.05
+    fee_usd_per_trade: float | None = None  # None = network-cost model of execution.costs
     impact_coefficient: float = 1.0
     exit_mode: ExitMode = ExitMode.PROTECTED
     capital_usd: float = 1000.0
@@ -182,6 +186,14 @@ class Backtester:
         cfg = self._config()
         lat = timedelta(seconds=params.latency_seconds)
         last_px: dict[str, float] = {}
+        sol_px = next((ev.sol_price_usd for ev, _ in events if ev.sol_price_usd), FALLBACK_SOL_PRICE_USD)
+
+        def fee(buy: bool) -> float:
+            if params.fee_usd_per_trade is not None:
+                return params.fee_usd_per_trade
+            lamports = swap_fee_lamports(cfg) + (entry_rent_lamports(cfg) if buy else 0)
+            return lamports_to_usd(lamports, sol_px)
+
         step = timedelta(minutes=params.price_step_minutes)
         next_tick = t0
 
@@ -190,10 +202,11 @@ class Backtester:
 
         def close(pos: _Pos, fraction: float, price: float, when: datetime, reason: str) -> None:
             qty = pos.qty * fraction
-            proceeds = qty * price * (1 - params.exit_slippage_pct / 100) - params.fee_usd_per_trade
+            exit_fee = fee(buy=False)
+            proceeds = qty * price * (1 - params.exit_slippage_pct / 100) - exit_fee
             cost = pos.cost * fraction
             book.cash += proceeds
-            book.fees += params.fee_usd_per_trade
+            book.fees += exit_fee
             pos.qty -= qty
             pos.cost -= cost
             book.trades.append(
@@ -231,6 +244,8 @@ class Backtester:
                 next_tick += step
 
         for ev, copyable in events:
+            if ev.sol_price_usd:
+                sol_px = ev.sol_price_usd
             tick_until(ev.block_time)
             when = ev.block_time + lat
             base = self._price(ev.token_mint, when, ev.price_usd)
@@ -284,13 +299,14 @@ class Backtester:
             if ev.liquidity_usd:
                 impact = params.impact_coefficient * size.size_usd / (ev.liquidity_usd / 2 + size.size_usd)
             price = base * (1 + params.entry_slippage_pct / 100 + impact)
-            book.cash -= size.size_usd + params.fee_usd_per_trade
-            book.fees += params.fee_usd_per_trade
+            entry_fee = fee(buy=True)
+            book.cash -= size.size_usd + entry_fee
+            book.fees += entry_fee
             book.positions[ev.token_mint] = _Pos(
                 ev.token_mint,
                 ev.wallet,
                 size.size_usd / price,
-                size.size_usd + params.fee_usd_per_trade,
+                size.size_usd + entry_fee,
                 price,
                 price,
                 when,

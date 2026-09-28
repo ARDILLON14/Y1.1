@@ -45,6 +45,7 @@ from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
 from copytrader.positions.exits import ExitDecision, PositionView, evaluate_exit, source_sell_fraction
 from copytrader.providers.interfaces import TokenInfoProvider
+from copytrader.resilience.rate_limiter import Priority
 from copytrader.signals.engine import SignalContext
 
 log = structlog.get_logger(__name__)
@@ -423,7 +424,11 @@ class PositionManager:
             if not sol_price:
                 return None
             quote = await self.execution.executor(TradeMode(p.mode)).quote(
-                p.token_mint, cfg.execution.quote_mint, p.qty_raw, int(cfg.exits.exit_slippage_pct * 100)
+                p.token_mint,
+                cfg.execution.quote_mint,
+                p.qty_raw,
+                int(cfg.exits.exit_slippage_pct * 100),
+                priority=Priority.BACKGROUND,
             )
         except CopyTraderError as exc:
             log.debug("exit_quote_failed", position=p.id, error=str(exc))

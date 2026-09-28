@@ -31,6 +31,7 @@ from copytrader.core.models import Quote, SwapEvent
 from copytrader.core.types import Side, TxSource
 from copytrader.providers.interfaces import MarketData, MintData, RiskData, SwapHandler
 from copytrader.providers.solana.constants import SOL_MINT, TOKEN_2022_PROGRAM, TOKEN_PROGRAM
+from copytrader.resilience.rate_limiter import Priority
 
 log = structlog.get_logger(__name__)
 
@@ -818,7 +819,15 @@ class SimulatedQuotes:
     def __init__(self, market: SimulatedMarket) -> None:
         self.m = market
 
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote:
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote:
         out_raw, impact = self.m.quote(input_mint, output_mint, amount_raw)
         if out_raw <= 0:
             raise ProviderError("sim: zero output", provider="sim_quotes", retryable=False)

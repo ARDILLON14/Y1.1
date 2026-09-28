@@ -301,6 +301,8 @@ class RiskSection(Section):
     max_execution_errors_per_hour: int = Field(5, ge=0, description="0 disables")
     max_data_age_seconds: float = Field(30.0, gt=0)
     kill_on_reconciliation_mismatch: bool = True
+    # Reject entries whose fixed round-trip network cost exceeds this % of the position size.
+    max_round_trip_cost_pct: float = Field(3.0, gt=0, le=100)
     reserve_sol: float = Field(0.05, ge=HL.HARD_MIN_RESERVE_SOL)
     token_blacklist: list[str] = Field(default_factory=list)
     token_whitelist_only: bool = False
@@ -396,12 +398,29 @@ class ExecutionSection(Section):
     entry_max_attempts: int = Field(2, ge=1, le=5)
     exit_max_attempts: int = Field(5, ge=1, le=20)
     reconcile_interval_seconds: float = Field(30.0, gt=0)
+    # Priority fee actually expected per transaction (paper costs, backtest, cost filter).
+    # None = assume the configured maximum (conservative).
+    expected_priority_fee_lamports: int | None = Field(None, ge=0, le=50_000_000)
+    # Close empty token accounts after a position is closed to recover their rent (~0.002 SOL each).
+    close_empty_token_accounts: bool = True
+    close_accounts_interval_seconds: float = Field(120.0, ge=30)
+
+    @model_validator(mode="after")
+    def _expected_fee_within_max(self) -> ExecutionSection:
+        if (
+            self.expected_priority_fee_lamports is not None
+            and self.expected_priority_fee_lamports > self.priority_fee_max_lamports
+        ):
+            raise ValueError("execution.expected_priority_fee_lamports cannot exceed priority_fee_max_lamports")
+        return self
 
 
 class PaperSection(Section):
     simulated_latency_ms: float = Field(800.0, ge=0)
     extra_slippage_bps: float = Field(50.0, ge=0)
-    network_fee_sol: float = Field(0.000105, ge=0)
+    # Base network fee per transaction (one signature = 5,000 lamports). Priority fee,
+    # Jito tip and token-account rent are added from the execution settings.
+    network_fee_sol: float = Field(0.000005, ge=0)
     use_real_quotes: bool = True
 
 
@@ -472,7 +491,8 @@ class BacktestSection(Section):
     latency_seconds: float = Field(3.0, ge=0)
     entry_slippage_pct: float = Field(2.0, ge=0)
     exit_slippage_pct: float = Field(2.0, ge=0)
-    fee_usd_per_trade: float = Field(0.05, ge=0)
+    # None = the same network-cost model as paper trading (priority fee/tip + rent), per transaction.
+    fee_usd_per_trade: float | None = Field(None, ge=0)
     impact_coefficient: float = Field(1.0, ge=0)
 
 

@@ -16,7 +16,7 @@ from copytrader.core.errors import ProviderError, RateLimitedError
 from copytrader.observability import metrics
 from copytrader.observability.health import HealthRegistry, HealthStatus
 from copytrader.resilience.circuit_breaker import CircuitBreaker
-from copytrader.resilience.rate_limiter import TokenBucket
+from copytrader.resilience.rate_limiter import Priority, TokenBucket
 from copytrader.resilience.retry import RetryPolicy, retry_async
 
 log = structlog.get_logger(__name__)
@@ -67,13 +67,20 @@ class ResilientHttp:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
+        priority: int = Priority.NORMAL,
     ) -> Any:
-        return await self.request_json("GET", url, params=params, headers=headers, retry=retry)
+        return await self.request_json("GET", url, params=params, headers=headers, retry=retry, priority=priority)
 
     async def post_json(
-        self, url: str, *, json: Any = None, headers: dict[str, str] | None = None, retry: RetryPolicy | None = None
+        self,
+        url: str,
+        *,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        retry: RetryPolicy | None = None,
+        priority: int = Priority.NORMAL,
     ) -> Any:
-        return await self.request_json("POST", url, json=json, headers=headers, retry=retry)
+        return await self.request_json("POST", url, json=json, headers=headers, retry=retry, priority=priority)
 
     async def request_json(
         self,
@@ -84,9 +91,10 @@ class ResilientHttp:
         json: Any = None,
         headers: dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
+        priority: int = Priority.NORMAL,
     ) -> Any:
         async def attempt() -> Any:
-            return await self.breaker.call(lambda: self._once(method, url, params, json, headers))
+            return await self.breaker.call(lambda: self._once(method, url, params, json, headers, priority))
 
         try:
             result = await retry_async(attempt, retry or self.retry, name=f"{self.name}:{method}")
@@ -99,9 +107,15 @@ class ResilientHttp:
         return result
 
     async def _once(
-        self, method: str, url: str, params: dict[str, Any] | None, json: Any, headers: dict[str, str] | None
+        self,
+        method: str,
+        url: str,
+        params: dict[str, Any] | None,
+        json: Any,
+        headers: dict[str, str] | None,
+        priority: int = Priority.NORMAL,
     ) -> Any:
-        await self.bucket.acquire()
+        await self.bucket.acquire(priority=priority)
         started = time.perf_counter()
         outcome = "error"
         try:

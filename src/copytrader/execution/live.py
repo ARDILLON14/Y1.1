@@ -29,8 +29,11 @@ from copytrader.core.errors import CopyTraderError, ExecutionError, SecurityErro
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
 from copytrader.core.types import OrderPurpose, OrderStatus, Side, TradeMode
 from copytrader.execution.base import OrderHandle, quote_price_usd, slippage_bps
+from copytrader.execution.costs import lamports_to_usd
 from copytrader.providers.interfaces import ChainClient, QuoteSource, SwapTxBuilder, TokenInfoProvider
-from copytrader.providers.solana.parser import parse_swaps
+from copytrader.providers.solana.constants import TOKEN_ACCOUNT_RENT_LAMPORTS
+from copytrader.providers.solana.parser import created_token_accounts, parse_swaps
+from copytrader.resilience.rate_limiter import Priority
 from copytrader.security.signer import Signer
 from copytrader.security.signer_policy import SignIntent
 
@@ -66,8 +69,16 @@ class LiveExecutor:
             raise ExecutionError("execution.wallet_public_key no configurada")
         return wallet
 
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote:
-        return await self.quotes.quote(input_mint, output_mint, amount_raw, slippage_bps)
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote:
+        return await self.quotes.quote(input_mint, output_mint, amount_raw, slippage_bps, priority=priority)
 
     def _validate_quote(self, req: OrderRequest, q: Quote, sol_price: float) -> None:
         cfg = self._config()
@@ -249,6 +260,15 @@ class LiveExecutor:
             raise ExecutionError(f"no se encontró el swap del token en la tx {signature}")
         s = swaps[0]
         fee_usd = s.fee_sol * sol_price
+        cfg = self._config()
+        if (
+            req.side is Side.BUY
+            and not cfg.execution.close_empty_token_accounts
+            and req.token_mint in created_token_accounts(tx, self.wallet)
+        ):
+            # The parser leaves refundable rent out of the trade; if we never close the
+            # account it is not refundable, so it is a real cost of this entry.
+            fee_usd += lamports_to_usd(TOKEN_ACCOUNT_RENT_LAMPORTS, sol_price)
         qty = s.token_amount
         value = s.value_usd or s.quote_amount * sol_price
         token_raw = round(qty * 10**req.token_decimals)

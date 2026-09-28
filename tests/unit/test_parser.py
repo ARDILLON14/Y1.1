@@ -7,7 +7,7 @@ from copytrader.providers.solana.constants import (
     TOKEN_ACCOUNT_RENT_LAMPORTS,
     USDC_MINT,
 )
-from copytrader.providers.solana.parser import normalize_transaction, parse_swaps
+from copytrader.providers.solana.parser import created_token_accounts, normalize_transaction, parse_swaps
 
 WALLET = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"
 OTHER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
@@ -75,6 +75,17 @@ def test_buy_with_new_token_account_on_pumpfun():
     assert s.dex == "pumpfun"
     assert s.token_balance_before == 0 and s.token_balance_after == 1000
     assert s.block_time == datetime.fromtimestamp(BLOCK_TIME, tz=UTC)
+
+
+def test_created_token_accounts_lists_only_new_accounts_of_the_wallet():
+    tx = make_tx(
+        [WALLET, "ata1", "ata2", "ata_other"],
+        [10, 0, 5, 0],
+        [9, 0, 5, 0],
+        [tb(2, MINT2, WALLET, 7)],
+        [tb(1, MINT, WALLET, 1_000), tb(2, MINT2, WALLET, 0), tb(3, MINT, OTHER, 5)],
+    )
+    assert created_token_accounts(tx, WALLET) == [MINT]
 
 
 def test_sell_all_with_account_close_refund_excluded():

@@ -42,6 +42,7 @@ from copytrader.core.types import (
 from copytrader.db.base import Database
 from copytrader.db.repositories import EventLogRepo, PositionRepo, SignalRepo
 from copytrader.execution.base import quote_price_usd
+from copytrader.execution.costs import lamports_to_usd, round_trip_cost_lamports
 from copytrader.execution.mode import ModeController
 from copytrader.execution.service import ExecutionService
 from copytrader.observability import metrics
@@ -49,6 +50,7 @@ from copytrader.risk.engine import EntryRequest, RiskEngine
 from copytrader.signals.engine import SignalContext, SignalEngine, copyable
 
 log = structlog.get_logger(__name__)
+_COST_LABEL = "Coste de red de ida y vuelta asumible"
 
 
 class Rejected(Exception):
@@ -322,6 +324,8 @@ class CopyPipeline:
             raise Rejected()
         state["size"] = rd.size_usd
         try:
+            # 8b. fixed network costs vs size: small trades rarely survive their own fees
+            await self._check_round_trip_cost(rd.size_usd, checks)
             # 5. slippage for OUR size + 10b. deviation after the delay
             quote, _ = await self._quote_and_validate(ctx, token, rd.size_usd, checks, state)
             # 10c. TTL right before sending (+ re-quote if the quote got old)
@@ -413,6 +417,27 @@ class CopyPipeline:
             )
         )
         return SignalStatus.APPROVED if pending else SignalStatus.FAILED
+
+    async def _check_round_trip_cost(self, size_usd: float, checks: list[CheckResult]) -> None:
+        cfg = self._config()
+        limit = cfg.risk.max_round_trip_cost_pct
+        sol_price = await self.tokens.sol_price()
+        if not sol_price:
+            no_price = CheckResult("round_trip_cost", _COST_LABEL, False, message="precio de SOL no disponible")
+            self._fail(checks, no_price)
+        cost_usd = lamports_to_usd(round_trip_cost_lamports(cfg), sol_price)
+        pct = cost_usd / size_usd * 100 if size_usd > 0 else float("inf")
+        self._check(
+            checks,
+            CheckResult(
+                "round_trip_cost",
+                _COST_LABEL,
+                pct <= limit,
+                round(pct, 2),
+                limit,
+                f"{cost_usd:.2f} USD = {pct:.2f}% del tamaño (máx {limit:g}%)",
+            ),
+        )
 
     async def _quote_and_validate(
         self,

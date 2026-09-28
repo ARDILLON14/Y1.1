@@ -4,7 +4,7 @@ import pytest
 
 from copytrader.core.errors import CircuitOpenError, ProviderError, RateLimitedError
 from copytrader.resilience.circuit_breaker import BreakerState, CircuitBreaker
-from copytrader.resilience.rate_limiter import SlidingWindowCounter, TokenBucket
+from copytrader.resilience.rate_limiter import Priority, SlidingWindowCounter, TokenBucket
 from copytrader.resilience.retry import RetryPolicy, retry_async
 
 
@@ -119,6 +119,23 @@ async def test_token_bucket_limits_rate():
     assert bucket.try_acquire()
     assert not bucket.try_acquire()
     await asyncio.wait_for(bucket.acquire(), timeout=1)
+
+
+async def test_token_bucket_serves_order_execution_before_background_polling():
+    bucket = TokenBucket(rate=20, capacity=1)
+    await bucket.acquire()  # budget exhausted
+    served: list[str] = []
+
+    async def take(name: str, priority: Priority) -> None:
+        await bucket.acquire(priority=priority)
+        served.append(name)
+
+    background = [asyncio.create_task(take(f"price{i}", Priority.BACKGROUND)) for i in range(3)]
+    await asyncio.sleep(0)  # the price polls queue up first...
+    execution = asyncio.create_task(take("quote", Priority.EXECUTION))  # ...then an order needs a quote
+    await asyncio.wait_for(asyncio.gather(*background, execution), timeout=3)
+    assert served[0] == "quote"
+    assert sorted(served[1:]) == ["price0", "price1", "price2"]
 
 
 def test_sliding_window_counter():

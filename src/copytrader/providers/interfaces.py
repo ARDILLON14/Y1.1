@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from copytrader.core.models import Quote, SwapEvent, TokenInfo
 from copytrader.core.types import TxSource
+from copytrader.resilience.rate_limiter import Priority
 
 SwapHandler = Callable[[SwapEvent], Awaitable[None]]
 
@@ -99,7 +100,15 @@ class SolPriceHistory(Protocol):
 
 
 class QuoteSource(Protocol):
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote: ...
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote: ...
 
 
 @dataclass(frozen=True, slots=True)

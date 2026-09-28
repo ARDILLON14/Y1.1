@@ -104,6 +104,17 @@ class _TokenDelta:
         return raw / (10**self.decimals)
 
 
+def created_token_accounts(raw: Mapping[str, Any], wallet: str) -> list[str]:
+    """Mints of the token accounts owned by ``wallet`` that this transaction created."""
+    meta = normalize_transaction(raw).meta
+    pre = {int(b.get("accountIndex", -1)) for b in meta.get("preTokenBalances") or [] if b.get("owner") == wallet}
+    return [
+        str(b["mint"])
+        for b in meta.get("postTokenBalances") or []
+        if b.get("owner") == wallet and int(b.get("accountIndex", -1)) not in pre
+    ]
+
+
 def parse_swaps(
     raw: Mapping[str, Any],
     wallet: str,

@@ -2,7 +2,8 @@
 
 Uses a *real* quote for our exact size (Jupiter in live-data mode, the AMM
 model in simulation) so the simulated fill includes the true price impact, then
-adds a configurable latency slippage and network fees. The result records the
+adds a configurable latency slippage and the network costs the live
+transaction would pay (see ``execution.costs``). The result records the
 signal price, theoretical (mid) price, quoted price and simulated fill price —
 exactly the comparison the operator needs before risking real money.
 """
@@ -19,7 +20,9 @@ from copytrader.core.errors import CopyTraderError, ExecutionError
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
 from copytrader.core.types import OrderStatus, Side, TradeMode
 from copytrader.execution.base import OrderHandle, quote_price_usd, slippage_bps
+from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd, swap_fee_lamports
 from copytrader.providers.interfaces import QuoteSource, TokenInfoProvider
+from copytrader.resilience.rate_limiter import Priority
 
 
 class PaperExecutor:
@@ -33,8 +36,16 @@ class PaperExecutor:
         self.clock = clock
         self._config = config
 
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote:
-        return await self.quotes.quote(input_mint, output_mint, amount_raw, slippage_bps)
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote:
+        return await self.quotes.quote(input_mint, output_mint, amount_raw, slippage_bps, priority=priority)
 
     async def run(self, handle: OrderHandle, req: OrderRequest, quote: Quote | None) -> ExecutionResult:
         cfg = self._config()
@@ -61,9 +72,12 @@ class PaperExecutor:
                 mode=self.mode,
                 error="slippage simulado supera la tolerancia (la tx fallaría on-chain)",
             )
-        fees_usd = cfg.paper.network_fee_sol * sol_price
-        if cfg.execution.jito_tip_lamports:
-            fees_usd += cfg.execution.jito_tip_lamports / 1e9 * sol_price
+        # Same network costs the live transaction would pay (base + priority fee or tip),
+        # plus the token-account rent on buys when empty accounts are not closed/refunded.
+        fee_lamports = swap_fee_lamports(cfg)
+        if req.side is Side.BUY:
+            fee_lamports += entry_rent_lamports(cfg)
+        fees_usd = lamports_to_usd(fee_lamports, sol_price)
         if req.side is Side.BUY:
             qty = out_raw / 10**req.token_decimals
             value = req.amount_in_raw / 1e9 * sol_price

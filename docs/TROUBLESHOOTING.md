@@ -116,6 +116,13 @@ El sizing, tras aplicar todos los factores y topes, queda por debajo de
 `risk.min_trade_usd`. El mensaje dice qué lo limitó (exposición disponible,
 riesgo por wallet, liquidez…). Suele indicar que ya hay mucha exposición abierta.
 
+**"No cumple — Coste de red de ida y vuelta asumible"**
+Las comisiones fijas de comprar y vender (priority fee o tip, y el alquiler si
+no cierras cuentas) superan `risk.max_round_trip_cost_pct` del tamaño. La
+operación es demasiado pequeña para ser rentable después de comisiones. Sube el
+tamaño por operación (capital, `risk.max_trade_usd`) o ajusta
+`execution.expected_priority_fee_lamports` a lo que realmente pagas.
+
 **Estoy en nivel 4-5 pero las entradas salen en PAPER**
 Alguna compuerta está cerrada; el motivo exacto aparece en *Sistema* y en el
 resumen: `levels.live_trading_enabled` en false, sin armar (tras cada
@@ -158,6 +165,14 @@ no pueden evaluarse: valora cerrarla manualmente.
 La salida falla repetidamente (sin liquidez, slippage mayor que
 `exits.exit_slippage_pct`). Se sigue reintentando con espera creciente. Puedes
 subir temporalmente `exits.exit_slippage_pct` (máximo absoluto 50 %).
+
+**Quedan cuentas de token vacías en la wallet del bot**
+Solo se cierran con el trading real armado, cada
+`execution.close_accounts_interval_seconds`, y nunca si tienen saldo (aunque
+sea polvo), posición abierta u orden en vuelo. Una cuenta cuyo cierre falla
+(p. ej. Token-2022 con comisiones retenidas) se reintenta más tarde con espera
+creciente. Log `token_account_close_failed`; los cierres correctos aparecen como
+`token_accounts_closed` con el SOL recuperado.
 
 ## Notificaciones
 

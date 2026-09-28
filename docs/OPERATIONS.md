@@ -111,14 +111,20 @@ cambios de estado de wallets. Las notificaciones nunca contienen secretos
    límites de `risk`/`sizing`/`exits`. El paper trading usa las mismas reglas
    que el real.
 3. Deja `paper.use_real_quotes: true`: cada copia pide una cotización real a
-   Jupiter y aplica latencia, slippage y comisiones simulados.
+   Jupiter y aplica latencia, slippage y los mismos costes de red que pagaría
+   la transacción real (priority fee o tip y, si desactivas el cierre de
+   cuentas, el alquiler de la cuenta del token). Ver
+   [CONFIGURATION.md §6](CONFIGURATION.md#6-costes-de-red).
 4. Sigue en *Resumen*, *Señales* (cada decisión con sus comprobaciones y su
    línea temporal), *Posiciones* y *Operaciones*.
 
 Mínimo recomendado: **2-4 semanas** en paper antes del nivel 4 (el preflight
 exige `levels.preflight_min_paper_days`, 7 por defecto). Mira sobre todo:
-slippage real frente al esperado, cuántas señales caducan por latencia, y si
-el resultado depende de una o dos operaciones.
+slippage real frente al esperado, cuántas señales caducan por latencia, qué
+parte del resultado se va en comisiones, y si el resultado depende de una o
+dos operaciones. Si muchas entradas se rechazan por "Coste de red de ida y
+vuelta", tu tamaño por operación es demasiado pequeño para las comisiones:
+sube el capital por operación o baja la priority fee, no relajes el filtro.
 
 ### Backtesting
 
@@ -218,6 +224,12 @@ Empieza en **nivel 4** (topes de `levels.level4`: 20 USD por operación, 3
 posiciones, 2 % de pérdida diaria por defecto) al menos 1-2 semanas. Compara
 las ejecuciones reales con lo que predijo el paper trading. Solo entonces
 considera el nivel 5 (`app.operating_level: 5`, reinicio, *Sistema → Nivel 5*).
+
+Con el trading real armado, el sistema cierra cada 2 minutos las cuentas de
+token que quedan vacías tras vender y recupera su alquiler (~0,002 SOL por
+token). Tras la primera semana, mira en *Operaciones* la comisión media real y
+ponla en `execution.expected_priority_fee_lamports`: así el paper, el backtest
+y el filtro de coste usan tu coste real en lugar del tope.
 
 Para parar el dinero real en cualquier momento: *Desarmar*, bajar a nivel 3,
 o activar un kill switch.

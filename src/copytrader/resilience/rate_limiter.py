@@ -5,10 +5,25 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from enum import IntEnum
+
+_BLOCKED_POLL_SECONDS = 0.02
+
+
+class Priority(IntEnum):
+    """Who is served first when a provider's budget is exhausted (lower = first)."""
+
+    EXECUTION = 0  # quotes and swaps of orders being executed (entries and exits)
+    NORMAL = 1
+    BACKGROUND = 2  # price polling, fallback quotes: may always wait
 
 
 class TokenBucket:
-    """Allows ``rate`` operations per second with bursts up to ``capacity``."""
+    """Allows ``rate`` operations per second with bursts up to ``capacity``.
+
+    Waiters are served by priority, FIFO within the same priority: a burst of
+    background price polling can never delay the quote of an order.
+    """
 
     def __init__(self, rate: float, capacity: float | None = None, clock: Callable[[], float] = time.monotonic) -> None:
         if rate <= 0:
@@ -18,7 +33,8 @@ class TokenBucket:
         self._tokens = self.capacity
         self._clock = clock
         self._updated = clock()
-        self._lock = asyncio.Lock()
+        self._locks: dict[int, asyncio.Lock] = {}
+        self._waiting: dict[int, int] = {}
 
     def _refill(self) -> None:
         now = self._clock()
@@ -32,14 +48,24 @@ class TokenBucket:
             return True
         return False
 
-    async def acquire(self, tokens: float = 1.0) -> None:
-        async with self._lock:  # FIFO fairness between waiters
-            while True:
-                self._refill()
-                if self._tokens >= tokens:
-                    self._tokens -= tokens
-                    return
-                await asyncio.sleep((tokens - self._tokens) / self.rate)
+    def _higher_priority_waiting(self, priority: int) -> bool:
+        return any(count > 0 for p, count in self._waiting.items() if p < priority)
+
+    async def acquire(self, tokens: float = 1.0, *, priority: int = Priority.NORMAL) -> None:
+        lock = self._locks.setdefault(priority, asyncio.Lock())
+        self._waiting[priority] = self._waiting.get(priority, 0) + 1
+        try:
+            async with lock:  # FIFO fairness within the same priority
+                while True:
+                    self._refill()
+                    blocked = self._higher_priority_waiting(priority)
+                    if self._tokens >= tokens and not blocked:
+                        self._tokens -= tokens
+                        return
+                    missing = max(0.0, tokens - self._tokens) / self.rate
+                    await asyncio.sleep(max(missing, _BLOCKED_POLL_SECONDS) if blocked else missing)
+        finally:
+            self._waiting[priority] -= 1
 
     def penalize(self, seconds: float) -> None:
         """After a 429, drain the bucket so the next calls wait ``seconds``."""

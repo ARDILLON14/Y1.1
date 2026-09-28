@@ -31,6 +31,7 @@ from copytrader.execution.mode import ModeController
 from copytrader.execution.paper import PaperExecutor
 from copytrader.execution.recovery import OrderRecovery
 from copytrader.execution.service import ExecutionGuard, ExecutionService
+from copytrader.execution.token_accounts import TokenAccountJanitor
 from copytrader.notifications.channels import Channel, DiscordChannel, NotificationService, TelegramChannel
 from copytrader.observability import metrics
 from copytrader.observability.health import HealthRegistry
@@ -165,6 +166,16 @@ class Container:
             tokens=self.tokens,
             kill=self.kill,
         )
+        self.token_accounts: TokenAccountJanitor | None = None
+        if self.providers.live_executor is not None and self.providers.rpc is not None:
+            self.token_accounts = TokenAccountJanitor(
+                db=self.db,
+                chain=self.providers.rpc,
+                live=self.providers.live_executor,
+                mode=self.mode,
+                config=self.get_cfg,
+                locks=self.token_locks,
+            )
         self.notifier = NotificationService(self._channels(cfg), self.get_cfg)
         self.alerts = AlertService(self.db, self.clock, self.get_cfg, self.notifier)
         self.alerts.subscribe(self.bus)

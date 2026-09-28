@@ -128,7 +128,41 @@ Estos riesgos **no están eliminados**; conviene conocerlos antes de usar dinero
 - Copias de seguridad automáticas cifradas y prueba periódica de restauración.
 - Rotación programada de secretos con recordatorio.
 
-## 6. Conclusión
+## 6. Rentabilidad: hallazgos y hoja de ruta
+
+Una copia solo gana si la ventaja de la wallet supera lo que se pierde por
+llegar tarde y por los costes de ejecución. Revisión específica de esos puntos:
+
+**Implementado**
+
+| Hallazgo | Corrección |
+|---|---|
+| El paper trading cobraba 0,000105 SOL por transacción, mientras la real paga hasta 0,001 SOL de priority fee; el backtest usaba 0,05 USD fijos. Con operaciones de 10-20 USD, el paper sobrestimaba el resultado en ~2-4 % por operación | Modelo de costes único (`execution/costs.py`) para paper, backtest y decisión: comisión base + priority fee esperada o tip de Jito + alquiler de cuenta si no se cierra |
+| El alquiler de la cuenta de cada token (~0,002 SOL) nunca se recuperaba | Cierre automático de cuentas vacías tras vender, verificado por la política del firmador |
+| Operaciones cuyo coste fijo se come la ventaja | Filtro `risk.max_round_trip_cost_pct` (3 % por defecto) con explicación en la decisión |
+| Las cotizaciones y swaps de órdenes compartían el límite de 1 petición/s de Jupiter con la consulta de precios y podían esperar detrás de ella | Rate limit con prioridades: ejecución antes que precios en segundo plano |
+
+**Pendiente, por impacto esperado**
+
+1. **PnL replicado por wallet**: puntuar cada wallet por lo que habrías ganado
+   entrando con tu latencia real, tu tamaño y tus costes, y retraso máximo de
+   señal por wallet según su tiempo típico de holding.
+2. **Medición**: seguimiento de las señales rechazadas/caducadas (qué habría
+   pasado), atribución del resultado (por wallet, salida, retraso, comisiones)
+   y varias configuraciones en paper en paralelo.
+3. **Aprendizaje propio**: comparar el resultado de copiar a cada wallet con el
+   suyo y degradar las que no se pueden replicar; periodo de prueba en paper
+   para wallets nuevas.
+4. **Filtros por señal**: valor esperado neto de costes, confluencia de wallets
+   independientes, concentración de holders, liquidez bloqueada, presión
+   compradora, simulación de venta (honeypot), régimen de mercado.
+5. **Ejecución**: stream de menor latencia, priority fee dinámica, Jito.
+6. **Salidas**: perfil de salida por wallet, stops según volatilidad, salida
+   por caída de liquidez o por ventas de varias wallets seguidas.
+7. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
+   evaluar stop loss ni take profit entre operaciones).
+
+## 7. Conclusión
 
 - **Niveles 1-3** (análisis, alertas, paper): listos para usar.
 - **Niveles 4-5** (dinero real): técnicamente preparados y protegidos por

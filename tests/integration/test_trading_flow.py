@@ -254,3 +254,20 @@ async def test_untracked_wallet_keeps_mirroring_exits_of_open_positions(containe
 
     await c.refresh_tracking()  # nothing left open: the wallet is finally released
     assert wallet.address not in c.signals.tracked_addresses
+
+
+async def test_entries_eaten_by_network_costs_are_rejected(tmp_path, template_db):
+    c = await seeded_container(tmp_path, template_db, {"risk": {"max_round_trip_cost_pct": 0.01}})
+    try:
+        c.signals.start()
+        wallet = await _selected_wallet(c)
+        await c.signals.on_swap(live_swap(c, wallet.address, good_token(c), Side.BUY, 500.0, sig="cost"))
+        await c.signals.drain()
+        sig = (await _signals(c))[-1]
+        assert sig.status == SignalStatus.REJECTED.value
+        assert "Coste de red de ida y vuelta" in sig.reason and "del tamaño" in sig.reason
+        assert await _positions(c) == []
+        assert not c.risk._reservations  # the risk reservation was released
+    finally:
+        await c.signals.stop()
+        await c.aclose()

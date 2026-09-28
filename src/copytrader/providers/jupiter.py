@@ -11,6 +11,7 @@ from copytrader.core.errors import ProviderError
 from copytrader.core.models import Quote
 from copytrader.providers.interfaces import BuiltTransaction
 from copytrader.resilience.http import ResilientHttp
+from copytrader.resilience.rate_limiter import Priority
 
 
 class JupiterClient:
@@ -33,7 +34,15 @@ class JupiterClient:
         self.clock = clock or SystemClock()
         self._headers = {"x-api-key": api_key} if api_key else None
 
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote:
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote:
         if amount_raw <= 0:
             raise ValueError("amount must be positive")
         params = {
@@ -44,7 +53,7 @@ class JupiterClient:
             "swapMode": "ExactIn",
             "restrictIntermediateTokens": "true" if self.restrict else "false",
         }
-        data = await self.http.get_json(self.quote_url, params=params, headers=self._headers)
+        data = await self.http.get_json(self.quote_url, params=params, headers=self._headers, priority=priority)
         return parse_quote(data, self.clock)
 
     async def build_swap(
@@ -72,7 +81,7 @@ class JupiterClient:
             "dynamicComputeUnitLimit": True,
             "prioritizationFeeLamports": fee,
         }
-        data = await self.http.post_json(self.swap_url, json=body, headers=self._headers)
+        data = await self.http.post_json(self.swap_url, json=body, headers=self._headers, priority=Priority.EXECUTION)
         tx_b64 = (data or {}).get("swapTransaction")
         lvbh = (data or {}).get("lastValidBlockHeight")
         if not tx_b64 or lvbh is None:
@@ -88,7 +97,10 @@ class JupiterClient:
         unique = list(dict.fromkeys(mints))
         for i in range(0, len(unique), 50):
             chunk = unique[i : i + 50]
-            data = await self.http.get_json(self.price_url, params={"ids": ",".join(chunk)}, headers=self._headers)
+            # Background: price polling must never delay the quote or swap of an order.
+            data = await self.http.get_json(
+                self.price_url, params={"ids": ",".join(chunk)}, headers=self._headers, priority=Priority.BACKGROUND
+            )
             for mint, item in (data or {}).items():
                 if not isinstance(item, dict):
                     continue

@@ -55,6 +55,8 @@ providers:
     swap_url: https://lite-api.jup.ag/swap/v1/swap
     price_url: https://lite-api.jup.ag/price/v3
     rate_limit_per_second: 1           # lite API: ~60/min. Con API key de pago, súbelo.
+                                       # Las cotizaciones/swaps de órdenes tienen prioridad sobre
+                                       # la consulta de precios: nunca esperan detrás de ella.
     timeout_seconds: 5
     restrict_intermediate_tokens: true
   dexscreener:
@@ -206,6 +208,9 @@ risk:                                 # [en caliente]  Risk Management Engine
   max_execution_errors_per_hour: 5     # 0 desactiva
   max_data_age_seconds: 30
   kill_on_reconciliation_mismatch: true
+  max_round_trip_cost_pct: 3.0         # rechaza entradas cuyo coste fijo de red (compra + venta)
+                                       # supere este % del tamaño: con operaciones pequeñas las
+                                       # comisiones se comen la ventaja
   reserve_sol: 0.05                    # SOL que nunca se gasta (comisiones)
   token_blacklist: []
   token_whitelist_only: false
@@ -251,7 +256,9 @@ execution:                            # [en caliente, salvo las claves bloqueada
   quote_mint: So11111111111111111111111111111111111111112   # [bloqueada] pagar en SOL
   wallet_public_key: null              # [bloqueada] clave PÚBLICA de la wallet del bot
   slippage_bps: 150                    # tolerancia en la tx (≤ max_slippage_pct)
-  priority_fee_max_lamports: 1000000
+  priority_fee_max_lamports: 1000000   # tope por transacción (0,001 SOL)
+  expected_priority_fee_lamports: null  # lo que pagas de media; null = asumir el tope (conservador).
+                                       # Ajústalo con las comisiones reales que veas en Operaciones.
   priority_level: veryHigh
   confirm_timeout_seconds: 60
   rebroadcast_interval_ms: 1500
@@ -260,11 +267,16 @@ execution:                            # [en caliente, salvo las claves bloqueada
   entry_max_attempts: 2
   exit_max_attempts: 5
   reconcile_interval_seconds: 30
+  close_empty_token_accounts: true     # cierra las cuentas de token vacías tras vender y recupera
+                                       # su alquiler (~0,002 SOL por token). Solo con trading real armado.
+  close_accounts_interval_seconds: 120
 
 paper:                                # [en caliente]  paper trading
   simulated_latency_ms: 800
   extra_slippage_bps: 50
-  network_fee_sol: 0.000105
+  network_fee_sol: 0.000005            # comisión base por transacción; se suman la priority fee
+                                       # esperada (o el tip de Jito) y, si no se cierran las cuentas,
+                                       # el alquiler de la cuenta de token: los mismos costes que en real
   use_real_quotes: true
 
 levels:                               # [en caliente, salvo las claves bloqueadas]
@@ -320,5 +332,5 @@ backtest:                             # [en caliente]
   latency_seconds: 3
   entry_slippage_pct: 2
   exit_slippage_pct: 2
-  fee_usd_per_trade: 0.05
+  fee_usd_per_trade: null              # null = mismo modelo de costes que el paper trading
   impact_coefficient: 1.0

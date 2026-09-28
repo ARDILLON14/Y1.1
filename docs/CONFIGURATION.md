@@ -98,7 +98,9 @@ puntos básicos (100 bps = 1 %), `*_seconds`/`*_minutes` tiempo.
 - `catchup_on_reconnect` y `reconcile_poll_interval_seconds`: tras una
   desconexión se recuperan las operaciones perdidas; la reconciliación
   periódica es una red de seguridad, no el mecanismo principal.
-- `rate_limit_per_second` de cada proveedor: ajústalo a tu plan.
+- `rate_limit_per_second` de cada proveedor: ajústalo a tu plan. Dentro de
+  ese límite, las cotizaciones y swaps de órdenes (entradas y salidas) se
+  atienden siempre antes que la consulta periódica de precios, que puede esperar.
 - `token_categories_file`: categorías de tokens (meme, defi, IA…) para las
   métricas por categoría (ejemplo en `config/token_categories.example.yaml`).
 
@@ -154,7 +156,9 @@ posiciones máximas, tamaño mínimo/máximo, slippage, liquidez, market cap,
 antigüedad y score de riesgo del token, autoridades de mint/freeze, extensiones
 peligrosas de Token-2022, cooldown de reentrada, pérdidas consecutivas,
 errores de ejecución por hora, antigüedad máxima de los datos, reserva de SOL,
-listas de tokens.
+listas de tokens y `max_round_trip_cost_pct`: rechaza entradas cuyo coste fijo
+de red (compra + venta, ver [§6](#6-costes-de-red)) supere ese porcentaje del
+tamaño.
 
 ### `sizing`
 `method: risk_based | fixed`. En `risk_based` el tamaño parte del riesgo por
@@ -183,12 +187,18 @@ Cada wallet puede tener su propio modo de salida (detalle de wallet).
 ### `execution`
 Slippage de la transacción, prioridad y tope de priority fee, tiempo de
 confirmación, re-difusión, Jito tip opcional, reintentos de entrada/salida y
-reconciliación de saldos.
+reconciliación de saldos. Además:
+- `expected_priority_fee_lamports`: lo que pagas de media por transacción (para
+  los costes en paper, el backtest y el filtro de coste). `null` asume el tope,
+  que es conservador; ajústalo con las comisiones reales de *Operaciones*.
+- `close_empty_token_accounts`: cierra las cuentas de token vacías tras vender
+  y recupera su alquiler (ver [§6](#6-costes-de-red)).
 
 ### `paper`
-Latencia simulada, slippage extra y comisión de red, y si se usan
+Latencia simulada, slippage extra, comisión base por transacción y si se usan
 cotizaciones reales de Jupiter (recomendado: el paper trading solo es útil si
-se parece a la realidad).
+se parece a la realidad). El paper cobra los mismos costes de red que pagaría
+la transacción real ([§6](#6-costes-de-red)).
 
 ### `levels`
 Compuertas del dinero real (ver [OPERATIONS.md §6](OPERATIONS.md#6-activar-el-trading-real))
@@ -213,9 +223,32 @@ URL del firmador, ruta del keystore (solo `local`) y tolerancia de reloj HMAC.
 
 ### `backtest`
 Ventanas de entrenamiento y test, latencia, slippage, comisiones y coeficiente
-de impacto de mercado usados en la simulación.
+de impacto de mercado usados en la simulación. `fee_usd_per_trade: null` usa el
+mismo modelo de costes de red que el paper trading.
 
-## 6. Secretos
+## 6. Costes de red
+
+Cada operación paga costes fijos que no dependen de su tamaño, así que pesan
+mucho en operaciones pequeñas. El mismo modelo se usa en paper trading, en el
+backtest y en el filtro `risk.max_round_trip_cost_pct`:
+
+| Coste | Cuándo | Valor |
+|---|---|---|
+| Comisión base | cada transacción | 5.000 lamports (`paper.network_fee_sol`) |
+| Priority fee **o** tip de Jito | cada transacción (nunca ambos) | `execution.expected_priority_fee_lamports` (o el tope `priority_fee_max_lamports`) / `jito_tip_lamports` |
+| Alquiler de la cuenta del token | al comprar un token nuevo | ~0,00204 SOL; se **recupera** al cerrar la cuenta vacía tras vender (`close_empty_token_accounts: true`) y solo es coste si desactivas el cierre |
+
+Con los valores por defecto (tope de priority fee de 0,001 SOL) una compra y
+su venta cuestan ~0,002 SOL: con SOL a 200 USD son ~0,40 USD, un 4 % de una
+operación de 10 USD y un 2 % de una de 20 USD. El filtro rechaza por defecto
+las que superen el 3 %.
+
+El cierre de cuentas vacías solo envía transacciones con el trading real
+armado, nunca toca cuentas con saldo, con posición abierta u orden en vuelo, ni
+las de SOL/USDC/USDT, y agrupa hasta 8 cuentas por transacción. El firmador
+verifica que solo contenga cierres que devuelven el alquiler a la wallet del bot.
+
+## 7. Secretos
 
 Se cargan aparte, nunca se guardan en la base de datos ni se muestran por la
 API, y se enmascaran en logs y notificaciones. Fuentes, por prioridad:

@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from copytrader.core.models import ExecutionResult, OrderRequest, Quote
 from copytrader.core.types import OrderStatus, Side, TradeMode
+from copytrader.resilience.rate_limiter import Priority
 
 
 @dataclass(slots=True)
@@ -25,7 +26,15 @@ class OrderHandle:
 class Executor(Protocol):
     mode: TradeMode
 
-    async def quote(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int) -> Quote: ...
+    async def quote(
+        self,
+        input_mint: str,
+        output_mint: str,
+        amount_raw: int,
+        slippage_bps: int,
+        *,
+        priority: int = Priority.EXECUTION,
+    ) -> Quote: ...
 
     async def run(self, handle: OrderHandle, req: OrderRequest, quote: Quote | None) -> ExecutionResult: ...
 
