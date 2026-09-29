@@ -61,7 +61,11 @@ export async function render(root) {
     h("div", { class: "card section" }, h("h2", {}, "Ejecuciones"), table([
       { label: "#", num: true, render: (r) => r.id },
       { label: "Fecha", render: (r) => dt(r.created_at) },
-      { label: "Estado", render: (r) => r.status },
+      { label: "Estado", wrap: true, render: (r) => (r.status === "running" && r.progress
+        ? h("span", {}, "running", h("span", { class: "muted small" }, ` · ${r.progress}`)) : r.status) },
+      { label: "Precios", render: (r) => (r.prices
+        ? h("span", { title: "Tokens con velas históricas / tokens comprados en el periodo" }, `${r.prices.tokens_with_prices}/${r.prices.tokens_traded}`)
+        : h("span", { class: "muted" }, "—")) },
       { label: "ROI estrategia", num: true, render: (r) => pct(r.summary?.strategy?.roi_pct, 2, true) },
       { label: "ROI copiar todo", num: true, render: (r) => pct(r.summary?.copy_all?.roi_pct, 2, true) },
       { label: "ROI top PnL", num: true, render: (r) => pct(r.summary?.top_pnl?.roi_pct, 2, true) },
@@ -70,6 +74,17 @@ export async function render(root) {
     ], runs, { onRowClick: (r) => { selected = r.id; showRun(detail, r.id); }, empty: "Sin backtests" })),
     detail);
   if (selected || runs.find((r) => r.status === "done")) showRun(detail, selected || runs.find((r) => r.status === "done").id);
+}
+
+// How much of the evaluated period had real price paths (stops/TPs between trades).
+function pricesLine(p) {
+  const traded = p.tokens_traded || 0;
+  const share = traded ? Math.round((100 * (p.tokens_with_prices || 0)) / traded) : 0;
+  return h("p", { class: "secondary small" },
+    `Precios históricos: velas de ${p.candle_minutes} min para ${p.tokens_with_prices} de ${traded} tokens (${share} %)`,
+    p.fetched_now ? ` · ${p.fetched_now} descargados ahora` : "",
+    p.failed ? ` · ${p.failed} descargas fallidas (se reintentarán)` : "",
+    share < 50 ? h("span", { class: "muted" }, " · con poca cobertura, los stops y take profits entre operaciones apenas se simulan") : null);
 }
 
 const NAMES = { strategy: "Estrategia (scoring + riesgo)", copy_all: "Copiar todas", top_pnl: "Top por PnL (ingenuo)" };
@@ -97,6 +112,7 @@ async function showRun(el, id) {
       { label: "Comisiones", num: true, render: (v) => usd(v.summary.fees_usd) },
     ], variants), vchart) : "", h("div", { class: "card section" },
     h("h2", {}, `Backtest #${id} · ${run.results.period.start.slice(0, 10)} → ${run.results.period.end.slice(0, 10)}`),
+    run.results.prices ? pricesLine(run.results.prices) : null,
     table([
       { label: "Estrategia", render: (r) => NAMES[r.k] },
       { label: "Capital final", num: true, render: (r) => usd(r.final_equity_usd) },

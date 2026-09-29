@@ -41,6 +41,7 @@ from copytrader.observability.health import HealthRegistry, HealthStatus
 from copytrader.observability.speed import SpeedStats
 from copytrader.pipeline.copy_pipeline import CopyPipeline
 from copytrader.positions.manager import PositionManager
+from copytrader.providers.geckoterminal import GeckoTerminalClient
 from copytrader.providers.interfaces import HistorySource, QuoteSource, SolPriceHistory, SwapFeed
 from copytrader.providers.token_info import TokenCategorizer, TokenInfoService
 from copytrader.resilience.circuit_breaker import CircuitBreaker
@@ -83,6 +84,7 @@ class Container:
         self.health = HealthRegistry()
         self.speed = SpeedStats()
         self.sender: TransactionSender | None = None  # live providers only
+        self.price_history_client: GeckoTerminalClient | None = None  # live providers only (backtests)
         self.db = db or Database(secrets.database_url.get_secret_value())
         self.token_locks = KeyedLocks()
         REDACTOR.register(secrets.all_secret_values())
@@ -408,6 +410,10 @@ class Container:
         # landed Jito tips: dynamic tip in live and realistic tip costs in paper (polled only with Jito on)
         self.fees.tip_floor = JitoTipFloor(
             self._http("jito_tip_floor", timeout=5, rate=1), cfg.execution.jito_tip_floor_url
+        )
+        gt = p.geckoterminal
+        self.price_history_client = GeckoTerminalClient(
+            self._http("geckoterminal", timeout=gt.timeout_seconds, rate=gt.rate_limit_per_second), gt.base_url
         )
         return Providers(
             feed=feed,

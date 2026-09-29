@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 import structlog
 
 from copytrader.analysis.analyzer import TokenContext
 from copytrader.backtest.engine import Backtester, BacktestParams
+from copytrader.backtest.history import PriceHistory, load_price_history, price_needs
 from copytrader.config.models import AppConfig
 from copytrader.container import Container
 from copytrader.core.errors import ConfigError
@@ -43,6 +45,53 @@ def validate_variants(c: Container, variants: list[dict[str, Any]] | None) -> li
 
 def _constant(cfg: AppConfig) -> Callable[[], AppConfig]:
     return lambda: cfg
+
+
+async def _load_history(
+    c: Container, swaps: dict[str, list[Any]], params: BacktestParams, run_id: int
+) -> tuple[PriceHistory, dict[str, Any]]:
+    """Real candles for the tokens traded in the evaluated period (cached; missing ones downloaded)."""
+    b = c.cfg.backtest
+    times = [s.block_time for ss in swaps.values() for s in ss]
+    now = c.clock.now()
+    if not times:
+        return PriceHistory(b.candle_minutes), {}
+    start = params.start or min(times) + timedelta(days=params.train_days)
+    end = params.end or max(times)
+    needs, total = price_needs(swaps, start, end, now, b.max_price_tokens)
+
+    async def progress(done: int, todo: int) -> None:
+        if done != todo and done % 5:
+            return
+        async with c.db.session() as s:
+            row = await BacktestRepo(s).get(run_id)
+            if row is not None:
+                row.results = {"progress": f"Descargando precios históricos: {done}/{todo} tokens"}
+
+    history = await load_price_history(
+        c.db,
+        c.price_history_client,
+        needs,
+        b.candle_minutes,
+        now=now,
+        refetch_failed_after=timedelta(hours=b.refetch_failed_after_hours),
+        progress=progress,
+    )
+    info = {"source": "geckoterminal", "candle_minutes": b.candle_minutes, "tokens_traded": total, **history.stats}
+    return history, info
+
+
+def _prices_note(p: dict[str, Any]) -> str:
+    covered, traded = p.get("tokens_with_prices", 0), p.get("tokens_traded", 0)
+    note = (
+        f"Precios históricos: velas de {p.get('candle_minutes')} min (GeckoTerminal) para {covered} de {traded} "
+        "tokens comprados en el periodo. En ellos, stop loss, take profit, trailing y tiempo máximo se evalúan "
+        "entre operaciones, suponiendo dentro de cada vela el peor orden (primero el stop). El resto solo "
+        "usa los precios de las operaciones de las wallets."
+    )
+    if p.get("failed"):
+        note += f" {p['failed']} descargas fallaron (se reintentarán en el próximo backtest)."
+    return note
 
 
 def _summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -80,8 +129,15 @@ async def run_backtest(
         market = c.providers.simulated_market
         price_at = market.token_price if market is not None else None
         liquidity_at = market.liquidity if market is not None else None
-        bt = Backtester(c.get_cfg, price_at=price_at, liquidity_at=liquidity_at)
+        history: PriceHistory | None = None
+        prices: dict[str, Any] | None = None
+        if market is None and c.cfg.backtest.historical_prices:
+            history, prices = await _load_history(c, swaps, params, run_id)
+        bt = Backtester(c.get_cfg, price_at=price_at, liquidity_at=liquidity_at, history=history)
         result = await asyncio.to_thread(bt.run, dict(swaps), params, lists=lists, tokens=tokens, labels=labels)
+        if prices is not None and "error" not in result:
+            result["prices"] = prices
+            result["notes"].insert(0, _prices_note(prices))
         if variant_cfgs and "error" not in result:
             compared: list[dict[str, Any]] = [
                 {
@@ -93,7 +149,7 @@ async def run_backtest(
             ]
             for name, patch, cfg_v in variant_cfgs:
                 params_v = BacktestParams.from_config(cfg_v, **(overrides or {}))
-                bt_v = Backtester(_constant(cfg_v), price_at=price_at, liquidity_at=liquidity_at)
+                bt_v = Backtester(_constant(cfg_v), price_at=price_at, liquidity_at=liquidity_at, history=history)
                 res_v = await asyncio.to_thread(
                     bt_v.run, dict(swaps), params_v, lists=lists, tokens=tokens, labels=labels
                 )

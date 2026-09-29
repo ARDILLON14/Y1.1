@@ -215,6 +215,19 @@ comprobaciones seguidas: suele ser un rug o la retirada del LP. Si ves que salta
 por cambios de par en DexScreener (el pool más profundo cambió), sube
 `liquidity_exit_confirmations` o el porcentaje.
 
+**El backtest se queda en "Descargando precios históricos"**
+La primera vez descarga velas de muchos tokens a ~30 peticiones por minuto
+(límite de la API pública de GeckoTerminal): con 150 tokens puede tardar unos
+10-15 minutos. Se guardan en la base de datos y el siguiente backtest es rápido.
+Para ir más rápido, baja `backtest.max_price_tokens` o sube `candle_minutes` a 60.
+Si en los logs aparece `price_history_fetch_failed` con 429, es el límite de
+peticiones: esos tokens se reintentan en el siguiente backtest.
+
+**Pocos tokens con velas en el backtest**
+Tokens muy nuevos, ya retirados o cuyo pool principal no está en GeckoTerminal
+no tienen historial. Se usan solo sus precios de operación y no se vuelven a
+pedir hasta `backtest.refetch_failed_after_hours`.
+
 **El stop de una posición no coincide con `exits.stop_loss_pct`**
 Con `exits.volatility_stop: true` cada posición guarda el stop con el que se
 dimensionó (*Posiciones*, columna *Salida*; el detalle aparece al pasar el

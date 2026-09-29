@@ -102,6 +102,14 @@ class RugCheckSection(Section):
     timeout_seconds: float = Field(5.0, gt=0)
 
 
+class GeckoTerminalSection(Section):
+    """Historical candles for the backtester (public API, ~30 requests/minute)."""
+
+    base_url: str = "https://api.geckoterminal.com/api/v2"
+    rate_limit_per_second: float = Field(0.4, gt=0)
+    timeout_seconds: float = Field(10.0, gt=0)
+
+
 class SimulatedSection(Section):
     seed: int = 7
     n_wallets: int = Field(40, ge=1, le=500)
@@ -117,6 +125,7 @@ class ProvidersSection(Section):
     jupiter: JupiterSection = JupiterSection()
     dexscreener: DexScreenerSection = DexScreenerSection()
     rugcheck: RugCheckSection = RugCheckSection()
+    geckoterminal: GeckoTerminalSection = GeckoTerminalSection()
     simulated: SimulatedSection = SimulatedSection()
     retry: RetrySection = RetrySection()
     circuit_breaker: CircuitBreakerSection = CircuitBreakerSection()
@@ -664,6 +673,12 @@ class BacktestSection(Section):
     # None = the same network-cost model as paper trading (priority fee/tip + rent), per transaction.
     fee_usd_per_trade: float | None = Field(None, ge=0)
     impact_coefficient: float = Field(1.0, ge=0)
+    # Real historical candles (live data only; the simulated market has its own full price paths):
+    # with them, stop loss, take profit, trailing and time exits are evaluated between trades.
+    historical_prices: bool = True
+    candle_minutes: Literal[5, 15, 60] = 15
+    max_price_tokens: int = Field(150, ge=1, le=2000)  # most-traded tokens first; the rest use trade prices
+    refetch_failed_after_hours: float = Field(24.0, gt=0)
 
 
 # --------------------------------------------------------------------------- root

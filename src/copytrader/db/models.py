@@ -431,3 +431,43 @@ class SignalOutcome(Base):
     returns: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     completed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class PriceCandle(Base):
+    """Historical OHLCV candle of a token (USD), cached for backtesting."""
+
+    __tablename__ = "price_candles"
+    __table_args__ = (
+        UniqueConstraint("mint", "interval_minutes", "ts", name="uq_price_candle"),  # idempotency
+        Index("ix_price_candles_mint_ts", "mint", "interval_minutes", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mint: Mapped[str] = mapped_column(String(64))
+    interval_minutes: Mapped[int] = mapped_column(Integer)
+    ts: Mapped[datetime]  # start of the candle
+    open: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume_usd: Mapped[float | None] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(24))
+
+
+class PriceFetch(Base):
+    """A download attempt of a token's candles for a time range (the empty and failed ones too,
+    so a token without history is not asked for again on every backtest)."""
+
+    __tablename__ = "price_fetches"
+    __table_args__ = (Index("ix_price_fetches_mint", "mint", "interval_minutes"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    mint: Mapped[str] = mapped_column(String(64))
+    interval_minutes: Mapped[int] = mapped_column(Integer)
+    start: Mapped[datetime]
+    end: Mapped[datetime]
+    source: Mapped[str] = mapped_column(String(24))
+    pool: Mapped[str | None] = mapped_column(String(64))
+    candles: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow)

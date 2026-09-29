@@ -251,4 +251,7 @@ def backtest(b: BacktestRun, full: bool = False) -> dict[str, Any]:
         out["summary"] = {
             k: {kk: vv for kk, vv in v.items() if kk != "equity_curve"} for k, v in b.results["results"].items()
         }
+    if b.results:
+        out["progress"] = b.results.get("progress")  # e.g. while downloading historical prices
+        out["prices"] = b.results.get("prices")
     return out

@@ -25,25 +25,28 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from copytrader.analysis import stats
 from copytrader.analysis.analyzer import PriceAt, TokenContext, WalletAnalyzer
 from copytrader.analysis.replication import ReplicationParams, build_params
-from copytrader.config.models import AppConfig
+from copytrader.config.models import AppConfig, ExitsSection
 from copytrader.core.models import PRICE_CHANGE_WINDOWS, SwapEvent, hourly_volatility_from_changes
 from copytrader.core.types import ExitMode, ListType, Side, WalletStatus
 from copytrader.detection.detector import SuspicionDetector
 from copytrader.detection.rules import CoordinationIndex, DetectionContext
 from copytrader.execution.costs import entry_rent_lamports, lamports_to_usd, swap_fee_lamports
 from copytrader.positions.adaptive import build_exit_profile, effective_exits
-from copytrader.positions.exits import PositionView, evaluate_exit, source_sell_fraction
+from copytrader.positions.exits import ExitDecision, PositionView, evaluate_exit, source_sell_fraction
 from copytrader.risk.sizing import SizingInput, compute_size
 from copytrader.scoring.scorer import ScoringEngine
 from copytrader.scoring.status import decide_status
 from copytrader.selection.selector import Candidate, select_wallets
+
+if TYPE_CHECKING:
+    from copytrader.backtest.history import PriceHistory
 
 # Only used when no event carries a SOL price (network costs are denominated in SOL).
 FALLBACK_SOL_PRICE_USD = 150.0
@@ -130,6 +133,45 @@ class _Book:
         return self.cash + value
 
 
+STOP_TRIGGERS = frozenset({"stop_loss", "emergency_stop", "trailing_stop"})
+
+
+def _stop_level(trigger: str, pos: _Pos, cfg: ExitsSection) -> float | None:
+    if trigger == "emergency_stop":
+        return pos.entry_price * (1 - cfg.emergency_stop_loss_pct / 100)
+    if trigger == "stop_loss":
+        return pos.entry_price * (1 - cfg.stop_loss_pct / 100)
+    if trigger == "trailing_stop" and cfg.trailing_stop_pct is not None:
+        return pos.peak * (1 - cfg.trailing_stop_pct / 100)
+    return None
+
+
+def candle_exit(
+    pos: _Pos, ohlc: tuple[float, float, float, float], when: datetime, cfg: ExitsSection, mode: ExitMode
+) -> tuple[ExitDecision, float] | None:
+    """Exit inside one candle, and its fill price, assuming the worst order of events.
+
+    A candle does not say whether the low came before the high, so the adverse move is
+    checked first: a stop fills at its level, or at the open if the candle gapped through
+    it (never below the low). Then take profits fill at their level (or the open if the
+    candle opened above it). Anything else (trailing after a new high, time limit) fills
+    at the close.
+    """
+    o, h, low, c = ohlc
+    view = PositionView(pos.entry_price, pos.peak, pos.opened_at, mode, tuple(pos.tp_hit))
+    d = evaluate_exit(view, low, when, cfg)
+    if d is not None and d.trigger in STOP_TRIGGERS:
+        level = _stop_level(d.trigger, pos, cfg)
+        return d, (max(low, min(o, level)) if level else low)
+    view = replace(view, peak_price_usd=max(pos.peak, h))
+    d = evaluate_exit(view, h, when, cfg)
+    if d is not None and d.tp_level is not None:
+        level = pos.entry_price * (1 + cfg.take_profit_levels[d.tp_level].gain_pct / 100)
+        return d, min(h, max(o, level))
+    d = evaluate_exit(view, c, when, cfg)
+    return (d, c) if d is not None else None
+
+
 class Backtester:
     def __init__(
         self,
@@ -137,10 +179,14 @@ class Backtester:
         *,
         price_at: PriceAt | None = None,
         liquidity_at: PriceAt | None = None,
+        history: PriceHistory | None = None,
     ) -> None:
+        """``price_at``: exact price path (simulated market). ``history``: real candles; exits are
+        then evaluated per candle and entry/exit prices come from the trades (no look-ahead)."""
         self._config = config
-        self.price_at = price_at
-        self.liquidity_at = liquidity_at
+        self.history = history
+        self.price_at = history.price_at if history is not None else price_at
+        self.liquidity_at = history.liquidity_at if history is not None else liquidity_at
         self.analyzer = WalletAnalyzer(config)
         self.detector = SuspicionDetector()
         self.scorer = ScoringEngine(config)
@@ -278,7 +324,8 @@ class Backtester:
             lamports = swap_fee_lamports(cfg, value_usd, sol_px) + (entry_rent_lamports(cfg) if buy else 0)
             return lamports_to_usd(lamports, sol_px)
 
-        step = timedelta(minutes=params.price_step_minutes)
+        history = self.history
+        step = timedelta(minutes=history.candle_minutes if history else params.price_step_minutes)
         next_tick = t0
 
         def mark(mint: str) -> float | None:
@@ -313,11 +360,16 @@ class Backtester:
                 return
             while next_tick <= until:
                 for pos in list(book.positions.values()):
-                    px = self._price(pos.mint, next_tick, None)
+                    exits_cfg = effective_exits(ex, pos.adaptive)
+                    ohlc = (
+                        history.ohlc_between(pos.mint, max(next_tick - step, pos.opened_at), next_tick)
+                        if history is not None
+                        else None
+                    )
+                    px = ohlc[3] if ohlc else self._price(pos.mint, next_tick, None)
                     if not px:
                         continue
                     last_px[pos.mint] = px
-                    pos.peak = max(pos.peak, px)
                     if (
                         ex.liquidity_drop_exit_pct is not None
                         and self.liquidity_at is not None
@@ -327,12 +379,22 @@ class Backtester:
                     ):
                         close(pos, 1.0, px, next_tick, "liquidity_drop")
                         continue
+                    if ohlc is not None:
+                        hit = candle_exit(pos, ohlc, next_tick, exits_cfg, params.exit_mode)
+                        pos.peak = max(pos.peak, ohlc[1])
+                        if hit is not None:
+                            d, fill = hit
+                            if d.tp_level is not None:
+                                pos.tp_hit.append(d.tp_level)
+                            close(pos, d.fraction, fill, next_tick, d.trigger)
+                        continue
+                    pos.peak = max(pos.peak, px)
                     view = PositionView(pos.entry_price, pos.peak, pos.opened_at, params.exit_mode, tuple(pos.tp_hit))
-                    d = evaluate_exit(view, px, next_tick, effective_exits(ex, pos.adaptive))
-                    if d is not None:
-                        if d.tp_level is not None:
-                            pos.tp_hit.append(d.tp_level)
-                        close(pos, d.fraction, px, next_tick, d.trigger)
+                    decision = evaluate_exit(view, px, next_tick, exits_cfg)
+                    if decision is not None:
+                        if decision.tp_level is not None:
+                            pos.tp_hit.append(decision.tp_level)
+                        close(pos, decision.fraction, px, next_tick, decision.trigger)
                 book.curve.append((next_tick, book.equity(mark)))
                 next_tick += step
 
@@ -341,7 +403,11 @@ class Backtester:
                 sol_px = ev.sol_price_usd
             tick_until(ev.block_time)
             when = ev.block_time + lat
-            base = self._price(ev.token_mint, when, ev.price_usd)
+            if history is not None:
+                # real data: the trade's own price (a candle that has not closed yet would be look-ahead)
+                base = ev.price_usd or history.price_at(ev.token_mint, when)
+            else:
+                base = self._price(ev.token_mint, when, ev.price_usd)
             if not base:
                 continue
             last_px[ev.token_mint] = base

@@ -20,7 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 # Tables added by later revisions: the baseline must not create them, or those
 # revisions would fail on a fresh database.
-LATER_TABLES = frozenset({"signal_outcomes"})
+LATER_TABLES = frozenset({"signal_outcomes", "price_candles", "price_fetches"})
 
 
 def upgrade() -> None:

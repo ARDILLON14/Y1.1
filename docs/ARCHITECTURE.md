@@ -187,6 +187,7 @@ flowchart TD
 | Cotización y swap | **Jupiter Swap API** (`/swap/v1/quote`, `/swap/v1/swap`) | Jupiter Ultra **[futuro]** | Slippage estimado real, construcción de la transacción |
 | Precio | **Jupiter Price API v3** | DexScreener `priceUsd` | Marcar posiciones, SOL/USD |
 | Liquidez / market cap / edad | **DexScreener** `/tokens/v1/solana/{mints}` (gratis, 300 req/min) | Birdeye (de pago) | Filtros de liquidez, market cap, volatilidad |
+| Velas históricas (backtest) | **GeckoTerminal** `/networks/solana/pools/{pool}/ohlcv` (gratis, ~30 req/min; cacheadas en `price_candles`) | Birdeye OHLCV (de pago) | Stops/TP entre operaciones en el backtest con datos reales |
 | Riesgo de token | **RugCheck** `/v1/tokens/{mint}/report/summary` + comprobación on‑chain de `mintAuthority`/`freezeAuthority`/extensiones Token‑2022 | — | Filtro de riesgo |
 | Envío protegido **[opcional]** | RPC + reenvío hasta `lastValidBlockHeight` | Jito (tip), Helius Sender | Aterrizaje de transacciones |
 | Notificaciones | **Telegram Bot API**, **Discord webhooks** | — | Alertas |

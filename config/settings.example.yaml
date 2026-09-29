@@ -76,6 +76,10 @@ providers:
     base_url: https://api.rugcheck.xyz/v1
     rate_limit_per_second: 2
     timeout_seconds: 5
+  geckoterminal:                       # velas históricas para el backtest (API pública, sin clave)
+    base_url: https://api.geckoterminal.com/api/v2
+    rate_limit_per_second: 0.4         # ~30 peticiones/min en la API pública
+    timeout_seconds: 10
   simulated:                           # solo con mode: simulated
     seed: 7
     n_wallets: 40
@@ -397,6 +401,12 @@ backtest:                             # [en caliente]
   exit_slippage_pct: 2
   fee_usd_per_trade: null              # null = mismo modelo de costes que el paper trading
   impact_coefficient: 1.0
+  # Con datos reales: velas históricas (GeckoTerminal, guardadas en la base de datos) para que los
+  # stops, take profits, trailing y tiempo máximo ocurran también entre las operaciones de las wallets.
+  historical_prices: true
+  candle_minutes: 15                   # 5 | 15 | 60
+  max_price_tokens: 150                # tokens más comprados primero; el resto solo con precios de operación
+  refetch_failed_after_hours: 24       # tokens sin historial: no se vuelven a pedir hasta pasado este tiempo
 
 measurement:                          # [en caliente]  medición de decisiones (página Análisis)
   track_outcomes: true                 # seguir el precio tras cada decisión de copia, ejecutada o rechazada

@@ -153,6 +153,7 @@ llegar tarde y por los costes de ejecución. Revisión específica de esos punto
 | Cada transacción salía solo por el RPC principal | **Envío por varias rutas** a la vez (RPC, RPC extra, block engine de Jito) y modo solo-Jito *bundle-only* contra sándwiches |
 | La cotización de la venta (ruta de salida) esperaba a la de la compra y se repetía para cada señal del mismo token; los datos de mercado del token esperaban a los de RugCheck/mint | Cotización de venta en paralelo con la compra, caché de 5 min por token y datos del token pedidos a la vez a sus tres fuentes |
 | Una posición cuyo pool perdía la liquidez (rug, LP retirado) solo se cerraba cuando el precio caía hasta el stop | **Salida por caída de liquidez** (−50 % desde la entrada, confirmada dos veces), urgente y activa en todos los modos |
+| Con datos reales, el backtest solo conocía el precio de las operaciones de las wallets: un stop o un take profit nunca saltaba entre dos operaciones, lo que hacía parecer más seguras las posiciones abiertas | **Velas históricas reales** (GeckoTerminal, cacheadas en la base de datos) y evaluación vela a vela con el peor orden posible dentro de cada vela, sin mirar al futuro; cobertura indicada en cada resultado |
 | Mismos stop, tiempo máximo y take profit para cualquier token y wallet | **Perfil de salida adaptativo** (stop según volatilidad con el tamaño ajustado para arriesgar lo mismo; tiempo y TP según la wallet) y **salida cuando venden varias wallets fiables**: implementados y medidos, pero desactivados por defecto (ver abajo) |
 
 Efecto medido en el mercado simulado (walk-forward, mismos datos): con los
@@ -190,9 +191,9 @@ sin medir no está justificado.
    fiable: presión compradora reciente, concentración de holders calculada
    directamente (no solo el aviso de RugCheck) y simulación completa de la
    venta en cadena.
-3. **Backtest con histórico de precios real** (hoy, con datos reales, no puede
-   evaluar stop loss ni take profit entre operaciones, ni las salidas
-   adaptativas: se calculan sobre la serie de precios).
+3. **Histórico de liquidez y de holders** para el backtest con datos reales:
+   las velas dan el precio, pero la liquidez solo se conoce desde que el bot
+   funciona (sus propias observaciones).
 4. **Medir en la sombra** las salidas desactivadas (qué habría pasado si
    hubieran saltado), como ya se hace con las señales rechazadas.
 5. **Ejecución, siguiente paso**: stream gRPC (Yellowstone / LaserStream), que

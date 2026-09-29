@@ -336,6 +336,33 @@ Ventanas de entrenamiento y test, latencia, slippage, comisiones y coeficiente
 de impacto de mercado usados en la simulación. `fee_usd_per_trade: null` usa el
 mismo modelo de costes de red que el paper trading.
 
+**Precios históricos reales** (`historical_prices`, solo con `providers.mode:
+live`): sin ellos, con datos reales el backtest solo conoce el precio de las
+operaciones de las wallets, así que un stop loss o un take profit no pueden
+ocurrir entre dos operaciones. Con ellos:
+- Se descargan velas de `candle_minutes` del pool principal de cada token
+  comprado en el periodo (GeckoTerminal, API pública sin clave,
+  `providers.geckoterminal`), empezando por los más comprados y hasta
+  `max_price_tokens`. Se guardan en la base de datos: el siguiente backtest
+  solo descarga lo que falte. La primera vez puede tardar (unas 30 peticiones
+  por minuto); el progreso se ve en *Backtest → Ejecuciones*.
+- Un token sin historial no se vuelve a pedir hasta pasadas
+  `refetch_failed_after_hours`; los fallos transitorios (límite de peticiones,
+  red) se reintentan en el siguiente backtest.
+- Stops, take profits, trailing y tiempo máximo se evalúan vela a vela. Como
+  una vela no dice si llegó antes el mínimo o el máximo, se supone el **peor
+  orden**: primero el stop (al precio del stop, o a la apertura si la vela
+  abrió por debajo), después el take profit (a su nivel), y el resto al cierre.
+- Sin mirar al futuro: una posición solo usa velas que empiezan después de
+  abrirla y ya han cerrado; las entradas y las salidas por venta de la wallet
+  usan el precio de su operación.
+- La liquidez histórica sale de lo que el propio bot observó mientras
+  funcionaba (`token_snapshots`); antes de eso, la salida por caída de
+  liquidez no se puede simular.
+
+El resultado indica para cuántos tokens hubo velas. Con poca cobertura, el
+backtest se parece al de antes (solo precios de operación).
+
 ### `filters`
 Filtros por señal, aplicados en cada decisión además de los límites de riesgo.
 Cada uno aparece en la explicación de la decisión:

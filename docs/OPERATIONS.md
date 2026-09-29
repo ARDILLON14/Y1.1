@@ -154,6 +154,14 @@ ventanas que la configuración actual y se muestran lado a lado. Aplica un
 cambio solo si mejora de forma clara y con suficientes operaciones; una
 diferencia pequeña suele ser ruido.
 
+**Precios reales**: con datos reales, el backtest descarga (una vez) velas
+históricas de los tokens comprados en el periodo, para que los stops y take
+profits ocurran también entre operaciones. La columna *Precios* de las
+ejecuciones dice para cuántos tokens hubo velas; si la cobertura es baja, los
+resultados de salidas por precio son poco fiables. Es la forma de probar con
+datos reales las salidas desactivadas (stop por volatilidad, perfil de la
+wallet): lanza el backtest con una variante que las active.
+
 ### Filtros por señal
 
 Además de los límites de riesgo, cada decisión aplica los filtros de

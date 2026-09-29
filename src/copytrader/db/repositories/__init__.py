@@ -1,3 +1,4 @@
+from copytrader.db.repositories.prices import PriceHistoryRepo
 from copytrader.db.repositories.system import (
     AlertRepo,
     AuditRepo,
@@ -28,6 +29,7 @@ __all__ = [
     "ExecutionRepo",
     "OrderRepo",
     "PositionRepo",
+    "PriceHistoryRepo",
     "RiskEventRepo",
     "SignalRepo",
     "SystemStateRepo",
