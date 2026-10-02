@@ -81,7 +81,7 @@ chmod 600 secrets/solana_rpc_url && nano secrets/solana_rpc_url && chmod 444 sec
 |---|---|
 | `database_url`, `postgres_password` | generados automáticamente |
 | `solana_rpc_url`, `solana_ws_url` | tu RPC con API key (Helius, QuickNode, Triton…) — necesario con `providers.mode: live` |
-| `helius_api_key` | solo si usas `stream: helius_transaction_subscribe` |
+| `helius_api_key` | no hace falta: la clave de Helius ya va dentro de `solana_rpc_url` y `solana_ws_url` (déjalo vacío) |
 | `jupiter_api_key` | opcional (API de pago de Jupiter) |
 | `telegram_bot_token`, `discord_webhook_url` | notificaciones (opcionales) |
 | `signer_hmac_key` | generado: autentica app ↔ firmador |

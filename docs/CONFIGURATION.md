@@ -462,7 +462,8 @@ API, y se enmascaran en logs y notificaciones. Fuentes, por prioridad:
 | `SOLANA_WS_URL_BACKUP` | stream de respaldo (`providers.solana.backup_stream`), mejor de otro proveedor |
 | `SOLANA_SEND_RPC_URLS` | RPC extra que también reciben cada transacción, separados por comas |
 | `JITO_AUTH_UUID` | opcional: cabecera `x-jito-auth` para límites de envío más altos |
-| `HELIUS_API_KEY`, `JUPITER_API_KEY` | opcionales |
+| `JUPITER_API_KEY` | opcional (API de pago de Jupiter) |
+| `HELIUS_API_KEY` | no se usa: con Helius, la clave ya va dentro de `SOLANA_RPC_URL` y `SOLANA_WS_URL` |
 | `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL` | notificaciones |
 | `SIGNER_HMAC_KEY` (+ `SIGNER_HMAC_KEY_PREVIOUS` al rotar) | autenticación app ↔ firmador |
 | `KEYSTORE_PASSPHRASE` | solo con `signer_mode: local` (en `remote` la tiene únicamente el firmador) |
