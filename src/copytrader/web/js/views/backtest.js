@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { lineChart } from "../charts.js";
-import { h, table, pct, num, usd, dt, toast, frac, axisUsd } from "../dom.js";
+import { h, table, pct, num, usd, dt, toast, frac, axisUsd, clear, fill } from "../dom.js";
 
 export const refreshSeconds = 10;
 let selected = null;
@@ -42,7 +42,7 @@ export async function render(root) {
     try { await api.post("/backtest", body); toast("Backtest iniciado"); render(root); } catch (ex) { toast(ex.message, true); }
   };
   const detail = h("div");
-  root.replaceChildren(
+  fill(root, 
     h("h1", {}, "Backtesting walk-forward"),
     h("p", { class: "secondary" }, "Cada ventana selecciona wallets usando solo datos anteriores (entrenamiento) y simula la copia en la ventana siguiente (evaluación). Se compara con copiar todas las wallets y con elegirlas solo por PnL."),
     h("form", { class: "card", onsubmit: start },
@@ -92,12 +92,12 @@ const COLORS = { strategy: "var(--series-1)", copy_all: "var(--series-2)", top_p
 
 async function showRun(el, id) {
   const run = await api.get(`/backtest/${id}`);
-  if (!run.results?.results) { el.replaceChildren(); return; }
+  if (!run.results?.results) { clear(el); return; }
   const res = run.results.results;
   const chart = h("div");
   const variants = run.results.variants || [];
   const vchart = h("div");
-  el.replaceChildren(variants.length ? h("div", { class: "card section" },
+  fill(el, variants.length ? h("div", { class: "card section" },
     h("h2", {}, "Comparación de configuraciones"),
     h("p", { class: "muted small" }, "Misma historia, mismas ventanas; solo cambia la configuración. Una diferencia pequeña o en pocas "
       + "operaciones no es concluyente: confírmala con más periodo antes de aplicarla."),

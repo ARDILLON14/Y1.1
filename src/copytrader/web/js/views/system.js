@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, dt, toast, askPassword, severity, num, pct, usd, tile } from "../dom.js";
+import { h, table, dt, toast, askPassword, severity, num, pct, usd, tile, fill } from "../dom.js";
 
 export const refreshSeconds = 30;
 
@@ -28,7 +28,7 @@ export async function render(root) {
   };
   const disarm = async () => { await api.post("/system/disarm"); toast("Trading real desarmado"); render(root); };
   const pre = h("div");
-  root.replaceChildren(
+  fill(root, 
     h("h1", {}, "Sistema"),
     h("div", { class: "grid cols-2" },
       h("div", { class: "card" }, h("h2", {}, "Nivel operativo"),
@@ -44,9 +44,9 @@ export async function render(root) {
           h("span", { class: "secondary small" }, m.live_block_reason || "Trading real ARMADO")) : null),
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", {}, "Preflight (requisito para dinero real)"),
         h("button", { type: "button", onclick: async () => {
-          pre.replaceChildren(h("p", { class: "muted" }, "Ejecutando…"));
+          fill(pre, h("p", { class: "muted" }, "Ejecutando…"));
           const r = await api.get("/system/preflight");
-          pre.replaceChildren(h("p", {}, h("strong", {}, r.passed ? "✓ SUPERADO" : "✗ NO SUPERADO")),
+          fill(pre, h("p", {}, h("strong", {}, r.passed ? "✓ SUPERADO" : "✗ NO SUPERADO")),
             table([{ label: "", render: (c) => (c.passed ? "✓" : c.critical ? "✗" : "!") }, { label: "Comprobación", render: (c) => c.label },
               { label: "Detalle", wrap: true, render: (c) => c.message || "" }], r.checks));
         } }, "Ejecutar")), pre)),

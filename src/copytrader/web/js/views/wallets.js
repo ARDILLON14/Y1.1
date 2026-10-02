@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, addr, walletStatus, usd, frac, num, pct, ago, modal, toast, signClass } from "../dom.js";
+import { h, table, addr, walletStatus, usd, frac, num, pct, ago, modal, toast, signClass, fill } from "../dom.js";
 
 export const refreshSeconds = 60;
 const state = { status: "", list: "", q: "", onlySelected: false };
@@ -14,7 +14,7 @@ export async function render(root) {
   const rerender = () => render(root);
   const search = h("input", { type: "text", placeholder: "Buscar dirección o etiqueta", value: state.q,
     oninput: (e) => { state.q = e.target.value.toLowerCase(); clearTimeout(search._t); search._t = setTimeout(rerender, 250); } });
-  root.replaceChildren(
+  fill(root, 
     h("div", { class: "card-head" }, h("h1", {}, `Wallets (${wallets.length})`),
       h("div", { class: "row" },
         h("button", { type: "button", onclick: () => addDialog(rerender) }, "+ Añadir"),
@@ -97,7 +97,7 @@ function importDialog(done) {
       e.preventDefault();
       try {
         const r = await api.post("/wallets/import", { csv: text.value });
-        out.replaceChildren(h("p", {}, `Añadidas ${r.added.length} · actualizadas ${r.updated.length} · errores ${r.errors.length}`),
+        fill(out, h("p", {}, `Añadidas ${r.added.length} · actualizadas ${r.updated.length} · errores ${r.errors.length}`),
           r.errors.length ? h("ul", { class: "reasons" }, r.errors.map((x) => h("li", {}, x))) : "");
         if (!r.errors.length) { close(); }
         done();

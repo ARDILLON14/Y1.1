@@ -1,5 +1,5 @@
 import { api, setCsrf } from "./api.js";
-import { h, clear, toast, pct } from "./dom.js";
+import { h, clear, fill, toast, pct } from "./dom.js";
 
 const VIEWS = {
   overview: () => import("./views/overview.js"),
@@ -78,10 +78,10 @@ async function refreshStatus() {
   if (!authed) return;
   try {
     const s = await api.get("/system/status");
-    const strip = clear(document.getElementById("status-strip"));
+    const strip = document.getElementById("status-strip");
     const m = s.mode;
     const live = m.trade_mode === "live";
-    strip.append(
+    fill(strip,
       h("span", { class: "pill", title: m.live_block_reason || "" }, h("span", { class: `dot ${live ? "critical" : "accent"}` }),
         `Nivel ${m.level} · ${m.level_name}`),
       h("span", { class: "pill" }, h("span", { class: `dot ${live ? "critical" : m.trade_mode ? "good" : ""}` }),

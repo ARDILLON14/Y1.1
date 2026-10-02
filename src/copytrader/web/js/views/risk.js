@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, usd, pct, num, dt, meter, toast, askPassword, short, severity } from "../dom.js";
+import { h, table, usd, pct, num, dt, meter, toast, askPassword, short, severity, fill } from "../dom.js";
 
 export const refreshSeconds = 20;
 
@@ -22,7 +22,7 @@ export async function render(root) {
     try { await api.post("/risk/kill-switch", body); toast(action === "activate" ? "Kill switch activado" : "Kill switch desactivado"); render(root); }
     catch (ex) { toast(ex.message, true); }
   };
-  root.replaceChildren(
+  fill(root, 
     h("h1", {}, `Gestión de riesgo · libro ${r.mode.toUpperCase()} · nivel ${l.level}`),
     h("div", { class: "grid cols-2" },
       h("div", { class: "card" }, h("h2", {}, "Uso de límites"),

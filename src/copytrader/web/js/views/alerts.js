@@ -1,12 +1,12 @@
 import { api } from "../api.js";
-import { h, severity, dt, toast } from "../dom.js";
+import { h, severity, dt, toast, fill } from "../dom.js";
 
 export const refreshSeconds = 15;
 let sev = "";
 
 export async function render(root) {
   const rows = await api.get(`/alerts?limit=200${sev ? `&severity=${sev}` : ""}`);
-  root.replaceChildren(
+  fill(root, 
     h("div", { class: "card-head" }, h("h1", {}, "Alertas"),
       h("div", { class: "row" },
         h("div", { class: "segmented" }, [["", "Todas"], ["info", "Info"], ["warning", "Avisos"], ["critical", "Críticas"]].map(([v, l]) =>

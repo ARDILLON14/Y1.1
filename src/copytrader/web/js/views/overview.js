@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { lineChart } from "../charts.js";
-import { h, usd, pct, compactUsd, tile, meter, signClass, ago, severity, num, axisUsd, signalStatus } from "../dom.js";
+import { h, usd, pct, compactUsd, tile, meter, signClass, ago, severity, num, axisUsd, signalStatus, clear } from "../dom.js";
 
 export const refreshSeconds = 15;
 let range = 30;
@@ -11,7 +11,7 @@ export async function render(root) {
   ]);
   const b = ov.book;
   const m = ov.mode;
-  root.replaceChildren();
+  clear(root);
   if (ov.kill_switches.global.active || ov.kill_switches.daily.active) {
     const k = ov.kill_switches.global.active ? ov.kill_switches.global : ov.kill_switches.daily;
     root.append(h("div", { class: "banner critical" }, "⛔ ", h("div", {},

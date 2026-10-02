@@ -1,12 +1,12 @@
 import { api } from "../api.js";
-import { h, table, addr, usd, num, dt, short, signClass, price } from "../dom.js";
+import { h, table, addr, usd, num, dt, short, signClass, price, fill } from "../dom.js";
 
 export const refreshSeconds = 20;
 let mode = "";
 
 export async function render(root) {
   const rows = await api.get(`/trades?limit=300${mode ? `&mode=${mode}` : ""}`);
-  root.replaceChildren(
+  fill(root, 
     h("div", { class: "card-head" }, h("h1", {}, "Operaciones ejecutadas"),
       h("div", { class: "segmented" }, [["", "Todas"], ["paper", "Paper"], ["live", "Real"]].map(([v, l]) =>
         h("button", { type: "button", class: v === mode ? "active" : "", onclick: () => { mode = v; render(root); } }, l)))),

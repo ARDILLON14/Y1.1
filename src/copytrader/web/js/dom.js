@@ -25,6 +25,9 @@ export function append(el, children) {
 }
 
 export function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+// Replaces the children like el.replaceChildren(), but skipping null/false and flattening arrays
+// (the native call would render them as the text "null" or "[object HTMLDivElement]").
+export function fill(el, ...children) { return append(clear(el), children); }
 
 // ---------------------------------------------------------------- formatting
 const nf = (d) => new Intl.NumberFormat("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d });

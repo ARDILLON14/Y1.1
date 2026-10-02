@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, addr, signalStatus, usd, num, dt, short, modal, price } from "../dom.js";
+import { h, table, addr, signalStatus, usd, num, dt, short, modal, price, fill } from "../dom.js";
 
 export const refreshSeconds = 10;
 let status = "";
@@ -10,7 +10,7 @@ export async function render(root) {
   const rows = await api.get(`/signals?${q}`);
   const seg = (values, cur, set) => h("div", { class: "segmented" }, values.map(([v, l]) =>
     h("button", { type: "button", class: v === cur ? "active" : "", onclick: () => { set(v); render(root); } }, l)));
-  root.replaceChildren(
+  fill(root, 
     h("div", { class: "card-head" }, h("h1", {}, "Señales y decisiones"),
       h("div", { class: "row" },
         seg([["", "Todas"], ["copy", "Copia"], ["exit", "Salida"], ["alert", "Alerta"]], action, (v) => { action = v; }),

@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { h, table, addr, usd, pct, frac, signClass, tile } from "../dom.js";
+import { h, table, addr, usd, pct, frac, signClass, tile, fill } from "../dom.js";
 
 export const refreshSeconds = 60;
 let mode = "paper";
@@ -41,7 +41,7 @@ export async function render(root) {
   const seg = (values, cur, set) => h("div", { class: "segmented" }, values.map(([v, l]) =>
     h("button", { type: "button", class: v === cur ? "active" : "", onclick: () => { set(v); render(root); } }, l)));
   const c = r.costs;
-  root.replaceChildren(
+  fill(root, 
     h("div", { class: "card-head" }, h("h1", {}, "Análisis de resultados"),
       h("div", { class: "row" },
         seg([["paper", "Paper"], ["live", "Real"]], mode, (v) => { mode = v; }),

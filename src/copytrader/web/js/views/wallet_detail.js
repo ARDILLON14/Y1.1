@@ -1,13 +1,13 @@
 import { api } from "../api.js";
 import { lineChart, barChart, hbars } from "../charts.js";
-import { h, table, addr, walletStatus, severity, usd, frac, num, pct, dt, ago, short, toast, signClass, price, tile } from "../dom.js";
+import { h, table, addr, walletStatus, severity, usd, frac, num, pct, dt, ago, short, toast, signClass, price, tile, fill } from "../dom.js";
 
 export async function render(root, [address]) {
   const d = await api.get(`/wallets/${encodeURIComponent(address)}`);
   const w = d.wallet;
   const all = d.metrics.all || {};
   const rerender = () => render(root, [address]);
-  root.replaceChildren(
+  fill(root, 
     h("p", {}, h("a", { href: "#/wallets" }, "← Wallets")),
     header(w, rerender),
     h("div", { class: "grid cols-2 section" }, scoreCard(d.score, w), historyCard(d.score_history)),
