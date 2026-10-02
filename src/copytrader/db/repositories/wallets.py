@@ -184,6 +184,12 @@ class TransactionRepo:
         )
         return (await self.s.execute(stmt)).scalar_one_or_none()
 
+    async def signatures_for_wallet(self, wallet_id: int, since: datetime | None = None) -> set[str]:
+        stmt = select(WalletTransaction.signature).where(WalletTransaction.wallet_id == wallet_id)
+        if since is not None:
+            stmt = stmt.where(WalletTransaction.block_time >= since)
+        return set((await self.s.execute(stmt)).scalars().all())
+
     async def count_for_wallet(self, wallet_id: int) -> int:
         stmt = select(func.count()).select_from(WalletTransaction).where(WalletTransaction.wallet_id == wallet_id)
         return int((await self.s.execute(stmt)).scalar_one())

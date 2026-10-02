@@ -41,7 +41,7 @@ export async function render(root) {
     },
   }, buildFields(cfg.config[section], [section], inputs, !editable));
   const comment = h("input", { type: "text", placeholder: "Comentario del cambio (opcional)", maxlength: "500" });
-  fill(root, 
+  fill(root,
     h("h1", {}, `Configuración central (versión ${cfg.version})`),
     h("p", { class: "secondary" }, "Los cambios se validan en conjunto (incluidos los límites absolutos) y se versionan. Las secciones de solo lectura requieren editar config/settings.yaml y reiniciar."),
     h("div", { class: "row", style: { marginBottom: "12px" } },

@@ -3,6 +3,11 @@
 States: CLOSED (normal) → OPEN after ``failure_threshold`` consecutive failures
 → HALF_OPEN after ``reset_timeout`` (one trial call) → CLOSED on success or
 OPEN again on failure.
+
+A 429 (rate limited) is neither a failure nor a success: the dependency is up,
+it is only asking us to slow down, and the rate limiter + ``retry-after``
+already do that. Counting it would open the breaker and turn a short
+throttle into every pending call failing at once.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from typing import TypeVar
 
 import structlog
 
-from copytrader.core.errors import CircuitOpenError, ProviderError
+from copytrader.core.errors import CircuitOpenError, ProviderError, RateLimitedError
 
 log = structlog.get_logger(__name__)
 T = TypeVar("T")
@@ -98,6 +103,9 @@ class CircuitBreaker:
         self._before_call()
         try:
             result = await fn()
+        except RateLimitedError:
+            self._half_open_in_flight = False  # throttled, not down: let the next trial call go
+            raise
         except Exception as exc:
             failure = counts_as_failure(exc) if counts_as_failure else _default_failure(exc)
             if failure:

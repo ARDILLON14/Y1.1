@@ -22,7 +22,7 @@ export async function render(root) {
     try { await api.post("/risk/kill-switch", body); toast(action === "activate" ? "Kill switch activado" : "Kill switch desactivado"); render(root); }
     catch (ex) { toast(ex.message, true); }
   };
-  fill(root, 
+  fill(root,
     h("h1", {}, `Gestión de riesgo · libro ${r.mode.toUpperCase()} · nivel ${l.level}`),
     h("div", { class: "grid cols-2" },
       h("div", { class: "card" }, h("h2", {}, "Uso de límites"),

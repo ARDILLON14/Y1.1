@@ -14,12 +14,17 @@ export async function render(root) {
   const rerender = () => render(root);
   const search = h("input", { type: "text", placeholder: "Buscar dirección o etiqueta", value: state.q,
     oninput: (e) => { state.q = e.target.value.toLowerCase(); clearTimeout(search._t); search._t = setTimeout(rerender, 250); } });
-  fill(root, 
+  const pending = wallets.filter((w) => !w.backfilled).length;
+  fill(root,
     h("div", { class: "card-head" }, h("h1", {}, `Wallets (${wallets.length})`),
       h("div", { class: "row" },
         h("button", { type: "button", onclick: () => addDialog(rerender) }, "+ Añadir"),
         h("button", { type: "button", onclick: () => importDialog(rerender) }, "Importar CSV"),
         h("button", { type: "button", onclick: async () => { await api.post("/system/evaluate"); toast("Reevaluación solicitada"); } }, "Reevaluar ahora"))),
+    pending ? h("div", { class: "banner info" }, "ℹ ", h("div", {},
+      h("strong", {}, `Descargando historial: ${wallets.length - pending} de ${wallets.length} wallets listas`),
+      h("div", { class: "small" }, "Score, PnL y Ops aparecen cuando termina la descarga de todas y el análisis siguiente. "
+        + "Con un RPC gratuito, unos 2 minutos por wallet (hasta 1.000 transacciones cada una). Esta página se actualiza sola."))) : null,
     h("div", { class: "row", style: { marginBottom: "12px" } }, search,
       select(["", "active", "observe", "blocked"], ["Todos los estados", "ACTIVA", "OBSERVAR", "BLOQUEADA"], state.status, (v) => { state.status = v; rerender(); }),
       select(["", "none", "whitelist", "watchlist", "blacklist"], ["Todas las listas", "Sin lista", "Whitelist", "Watchlist", "Blacklist"], state.list, (v) => { state.list = v; rerender(); }),
@@ -44,7 +49,8 @@ export async function render(root) {
         }, pct(v, 2, true), m.realized_copy_n ? " ✓" : "");
       } },
       { label: "Drawdown", num: true, render: (w) => pct(w.metrics?.max_drawdown_pct, 1) },
-      { label: "Ops", num: true, render: (w) => w.metrics?.n_trades ?? "—" },
+      { label: "Ops", num: true, render: (w) => (w.backfilled ? w.metrics?.n_trades ?? "—"
+        : h("span", { class: "muted", title: "Descargando su historial" }, "descargando…")) },
       { label: "Última actividad", render: (w) => h("span", { class: "nowrap" }, ago(w.last_activity_at)) },
       { label: "Lista", render: (w) => listSelect(w, rerender) },
     ], filtered, { onRowClick: (w) => { location.hash = `#/wallet/${encodeURIComponent(w.address)}`; }, empty: "No hay wallets. Añádelas o importa un CSV." })),

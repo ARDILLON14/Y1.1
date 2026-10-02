@@ -56,7 +56,7 @@ providers:
     reconcile_poll_interval_seconds: 300   # red de seguridad (no es el mecanismo principal)
     backfill_max_signatures_per_wallet: 1000
     backfill_concurrency: 4
-    rate_limit_per_second: 20
+    rate_limit_per_second: 20         # ajústalo a tu plan, con margen: Helius Free (10/s) → 8
     timeout_seconds: 10
   jupiter:
     quote_url: https://lite-api.jup.ag/swap/v1/quote

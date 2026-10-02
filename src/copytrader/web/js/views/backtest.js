@@ -42,7 +42,7 @@ export async function render(root) {
     try { await api.post("/backtest", body); toast("Backtest iniciado"); render(root); } catch (ex) { toast(ex.message, true); }
   };
   const detail = h("div");
-  fill(root, 
+  fill(root,
     h("h1", {}, "Backtesting walk-forward"),
     h("p", { class: "secondary" }, "Cada ventana selecciona wallets usando solo datos anteriores (entrenamiento) y simula la copia en la ventana siguiente (evaluación). Se compara con copiar todas las wallets y con elegirlas solo por PnL."),
     h("form", { class: "card", onsubmit: start },

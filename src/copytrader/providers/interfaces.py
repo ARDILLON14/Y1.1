@@ -8,7 +8,7 @@ adapter would too.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
@@ -31,6 +31,9 @@ class SwapFeed(Protocol):
 
 
 class HistorySource(Protocol):
+    # Transactions of the last fetch of each wallet that could not be downloaded (0 = complete).
+    missing: dict[str, int]
+
     async def fetch_swaps(
         self,
         wallet: str,
@@ -39,6 +42,7 @@ class HistorySource(Protocol):
         until_signature: str | None = None,
         max_signatures: int = 1000,
         source: TxSource = TxSource.BACKFILL,
+        skip: Collection[str] = (),
     ) -> list[SwapEvent]: ...
 
 

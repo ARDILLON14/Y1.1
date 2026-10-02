@@ -113,6 +113,29 @@ async def test_client_errors_do_not_open_circuit():
     assert cb.state is BreakerState.CLOSED
 
 
+async def test_rate_limiting_does_not_open_circuit():
+    """A throttled provider is up: 429s must not turn into every pending call failing at once."""
+    cb = CircuitBreaker("x", failure_threshold=2)
+
+    async def throttled():
+        raise RateLimitedError("429", retry_after=1)
+
+    async def down():
+        raise ProviderError("down")
+
+    for _ in range(5):
+        with pytest.raises(RateLimitedError):
+            await cb.call(throttled)
+    assert cb.state is BreakerState.CLOSED
+    with pytest.raises(ProviderError):
+        await cb.call(down)
+    with pytest.raises(RateLimitedError):
+        await cb.call(throttled)  # neither a failure nor a success: does not reset the count
+    with pytest.raises(ProviderError):
+        await cb.call(down)
+    assert cb.state is BreakerState.OPEN
+
+
 async def test_token_bucket_limits_rate():
     bucket = TokenBucket(rate=100, capacity=2)
     assert bucket.try_acquire()

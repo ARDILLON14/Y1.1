@@ -7,7 +7,7 @@ export async function render(root, [address]) {
   const w = d.wallet;
   const all = d.metrics.all || {};
   const rerender = () => render(root, [address]);
-  fill(root, 
+  fill(root,
     h("p", {}, h("a", { href: "#/wallets" }, "← Wallets")),
     header(w, rerender),
     h("div", { class: "grid cols-2 section" }, scoreCard(d.score, w), historyCard(d.score_history)),

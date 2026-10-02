@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import heapq
 import math
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -638,6 +638,7 @@ class SimulatedMarket:
 class SimulatedHistorySource:
     def __init__(self, market: SimulatedMarket) -> None:
         self.m = market
+        self.missing: dict[str, int] = {}
 
     async def fetch_swaps(
         self,
@@ -647,7 +648,9 @@ class SimulatedHistorySource:
         until_signature: str | None = None,
         max_signatures: int = 1000,
         source: TxSource = TxSource.BACKFILL,
+        skip: Collection[str] = (),
     ) -> list[SwapEvent]:
+        self.missing[wallet] = 0
         swaps = self.m.history.get(wallet, [])
         if since is not None:
             swaps = [s for s in swaps if s.block_time >= since]
@@ -655,7 +658,7 @@ class SimulatedHistorySource:
             sigs = [s.signature for s in swaps]
             if until_signature in sigs:
                 swaps = swaps[sigs.index(until_signature) + 1 :]
-        return swaps[-max_signatures:]
+        return [s for s in swaps[-max_signatures:] if s.signature not in skip]
 
 
 class SimulatedFeed:

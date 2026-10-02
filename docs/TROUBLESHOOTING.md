@@ -74,10 +74,27 @@ desactivar un kill switch y aplicar/revertir configuración piden contraseña
 ## Datos y wallets
 
 **El backfill tarda horas / errores 429**
-El RPC gratuito limita las peticiones. Baja `providers.solana.rate_limit_per_second`
-y `backfill_concurrency`, o usa un RPC de pago. Verás `circuit_state` en los
-logs cuando un proveedor falla repetidamente: el circuito se abre, las
-llamadas fallan rápido durante `reset_timeout_seconds` y luego se reintenta.
+El RPC gratuito limita las peticiones (Helius Free: 10 por segundo). Pon
+`providers.solana.rate_limit_per_second` un poco por debajo de tu plan (8 con
+Helius Free) para dejar margen al stream en tiempo real, o usa un RPC de pago.
+Cuenta unos 2 minutos por wallet con 8 peticiones/s (1.000 transacciones).
+
+Un 429 no abre el circuit breaker: el limitador frena y respeta `retry-after`.
+Si el RPC falla de verdad (timeouts, 5xx) el circuito se abre durante
+`reset_timeout_seconds` (`circuit_state` en los logs); la descarga del
+historial espera a que se cierre y reintenta cada transacción (~100 s de
+paciencia) en lugar de descartarla.
+
+Progreso: la pantalla **Wallets** muestra «Descargando historial: N de M». En
+los logs, `backfill_done` es una wallet terminada y `backfill_incomplete` una
+que quedó con transacciones sin descargar (`missing`): el ciclo siguiente
+descarga solo lo que falta. Tras 3 intentos incompletos se acepta tal cual
+para no gastar créditos del RPC indefinidamente.
+
+```bash
+docker compose logs app | grep -cE '"event": "backfill_done"'       # wallets terminadas
+docker compose logs app | grep -E 'backfill_incomplete|backfill_failed' | tail -5
+```
 
 **Una wallet aparece con 0 operaciones**
 Solo se cuentan swaps que el parser entiende: compras/ventas contra SOL, USDC

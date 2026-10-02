@@ -7,7 +7,7 @@ let status = "open";
 export async function render(root) {
   const rows = await api.get(`/positions?status=${status}&limit=300`);
   const totalUnreal = rows.reduce((a, p) => a + (p.unrealized_pnl_usd || 0), 0);
-  fill(root, 
+  fill(root,
     h("div", { class: "card-head" }, h("h1", {}, "Posiciones"),
       h("div", { class: "segmented" }, [["open", "Abiertas"], ["closed", "Cerradas"]].map(([v, l]) =>
         h("button", { type: "button", class: v === status ? "active" : "", onclick: () => { status = v; render(root); } }, l)))),

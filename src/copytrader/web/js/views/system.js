@@ -28,7 +28,7 @@ export async function render(root) {
   };
   const disarm = async () => { await api.post("/system/disarm"); toast("Trading real desarmado"); render(root); };
   const pre = h("div");
-  fill(root, 
+  fill(root,
     h("h1", {}, "Sistema"),
     h("div", { class: "grid cols-2" },
       h("div", { class: "card" }, h("h2", {}, "Nivel operativo"),

@@ -41,7 +41,7 @@ export async function render(root) {
   const seg = (values, cur, set) => h("div", { class: "segmented" }, values.map(([v, l]) =>
     h("button", { type: "button", class: v === cur ? "active" : "", onclick: () => { set(v); render(root); } }, l)));
   const c = r.costs;
-  fill(root, 
+  fill(root,
     h("div", { class: "card-head" }, h("h1", {}, "Análisis de resultados"),
       h("div", { class: "row" },
         seg([["paper", "Paper"], ["live", "Real"]], mode, (v) => { mode = v; }),

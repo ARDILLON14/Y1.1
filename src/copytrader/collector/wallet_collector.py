@@ -23,6 +23,10 @@ from copytrader.providers.solana.constants import is_valid_address
 
 log = structlog.get_logger(__name__)
 
+# Backfills of one wallet that may end with missing transactions before its history is taken
+# as it is (each retry only downloads what is missing, but it still costs RPC credits).
+MAX_BACKFILL_ATTEMPTS = 3
+
 _LIST_ALIASES = {
     "": ListType.NONE,
     "none": ListType.NONE,
@@ -67,6 +71,7 @@ class WalletCollector:
         self._config = config
         self._validate = address_validator
         self._backfill_sem = asyncio.Semaphore(config().providers.solana.backfill_concurrency)
+        self._incomplete: dict[str, int] = {}  # address -> backfills that ended with missing transactions
 
     # ------------------------------------------------------------ registration
     async def add_wallet(
@@ -138,15 +143,19 @@ class WalletCollector:
 
     # ----------------------------------------------------------------- backfill
     async def backfill(self, address: str, *, force: bool = False) -> int:
+        """Download the wallet's history once. If some transactions could not be downloaded
+        (RPC throttling or down for minutes), it is NOT marked as backfilled and the next cycle
+        fetches only what is missing; after ``MAX_BACKFILL_ATTEMPTS`` it is accepted as is."""
         cfg = self._config()
+        since = self.clock.now() - timedelta(days=cfg.analysis.history_days)
         async with self.db.session() as s:
             wallet = await WalletRepo(s).get_by_address(address)
             if wallet is None:
                 raise ValueError("wallet no encontrada")
             wallet_id, already = wallet.id, wallet.backfilled_at is not None
-        if already and not force:
-            return 0
-        since = self.clock.now() - timedelta(days=cfg.analysis.history_days)
+            if already and not force:
+                return 0
+            stored = await TransactionRepo(s).signatures_for_wallet(wallet_id, since)
         async with self._backfill_sem:
             try:
                 swaps = await self.history.fetch_swaps(
@@ -154,16 +163,24 @@ class WalletCollector:
                     since=since,
                     max_signatures=cfg.providers.solana.backfill_max_signatures_per_wallet,
                     source=TxSource.BACKFILL,
+                    skip=stored,
                 )
             except CopyTraderError as exc:
                 log.warning("backfill_failed", wallet=address, error=str(exc))
                 return 0
+            missing = self.history.missing.get(address, 0)  # before any await: a catch-up may overwrite it
         new = await self.store_swaps(wallet_id, swaps)
-        async with self.db.session() as s:
-            wallet = await WalletRepo(s).get(wallet_id)
-            if wallet is not None:
-                wallet.backfilled_at = self.clock.now()
-        log.info("backfill_done", wallet=address, swaps=len(swaps), new=new)
+        attempts = self._incomplete.get(address, 0) + 1 if missing else 0
+        if missing and attempts < MAX_BACKFILL_ATTEMPTS:
+            self._incomplete[address] = attempts
+            log.warning("backfill_incomplete", wallet=address, swaps=len(swaps), new=new, missing=missing)
+        else:
+            self._incomplete.pop(address, None)
+            async with self.db.session() as s:
+                wallet = await WalletRepo(s).get(wallet_id)
+                if wallet is not None:
+                    wallet.backfilled_at = self.clock.now()
+            log.info("backfill_done", wallet=address, swaps=len(swaps), new=new, missing=missing)
         await self.refresh_tokens({sw.token_mint for sw in swaps})
         return new
 
