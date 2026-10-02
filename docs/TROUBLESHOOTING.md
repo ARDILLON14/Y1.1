@@ -79,7 +79,7 @@ El RPC gratuito limita las peticiones (Helius Free: 10 por segundo). Pon
 Helius Free) para dejar margen al stream en tiempo real, o usa un RPC de pago.
 Cuenta unos 2 minutos por wallet con 8 peticiones/s (1.000 transacciones).
 
-Un 429 no abre el circuit breaker: el limitador frena y respeta `retry-after`.
+Un 429 no abre el circuit breaker (prueba que el RPC responde: incluso lo cierra si estaba entreabierto); el limitador frena y respeta `retry-after`.
 Si el RPC falla de verdad (timeouts, 5xx) el circuito se abre durante
 `reset_timeout_seconds` (`circuit_state` en los logs); la descarga del
 historial espera a que se cierre y reintenta cada transacción (~100 s de

@@ -115,7 +115,8 @@ async def test_client_errors_do_not_open_circuit():
 
 async def test_rate_limiting_does_not_open_circuit():
     """A throttled provider is up: 429s must not turn into every pending call failing at once."""
-    cb = CircuitBreaker("x", failure_threshold=2)
+    clock = FakeTime()
+    cb = CircuitBreaker("x", failure_threshold=2, reset_timeout=10, clock=clock)
 
     async def throttled():
         raise RateLimitedError("429", retry_after=1)
@@ -127,13 +128,15 @@ async def test_rate_limiting_does_not_open_circuit():
         with pytest.raises(RateLimitedError):
             await cb.call(throttled)
     assert cb.state is BreakerState.CLOSED
-    with pytest.raises(ProviderError):
-        await cb.call(down)
-    with pytest.raises(RateLimitedError):
-        await cb.call(throttled)  # neither a failure nor a success: does not reset the count
-    with pytest.raises(ProviderError):
-        await cb.call(down)
+    for _ in range(2):
+        with pytest.raises(ProviderError):
+            await cb.call(down)
     assert cb.state is BreakerState.OPEN
+    clock.t = 11
+    assert cb.state is BreakerState.HALF_OPEN
+    with pytest.raises(RateLimitedError):
+        await cb.call(throttled)  # it answered: it is up again
+    assert cb.state is BreakerState.CLOSED
 
 
 async def test_token_bucket_limits_rate():
