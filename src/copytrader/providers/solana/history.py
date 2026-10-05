@@ -100,6 +100,14 @@ class RpcHistorySource:
             await self._sleep(delay)
         raise AssertionError("unreachable")
 
+    async def _load_sol_prices(self, sigs: list[dict[str, Any]]) -> None:
+        """SOL/USD for the whole period of these signatures, in one go (patiently)."""
+        times = [int(item["blockTime"]) for item in sigs if item.get("blockTime")]
+        if not times:
+            return
+        start, end = from_unix(min(times)), from_unix(max(times))
+        await self._patiently(lambda: self.sol_prices.sol_series(start, end))
+
     async def fetch_swaps(
         self,
         wallet: str,
@@ -110,10 +118,15 @@ class RpcHistorySource:
         source: TxSource = TxSource.BACKFILL,
         skip: Collection[str] = (),
     ) -> list[SwapEvent]:
-        """Swaps of ``wallet`` (oldest first). ``skip``: signatures already stored, not downloaded again."""
+        """Swaps of ``wallet`` (oldest first). ``skip``: signatures already stored, not downloaded again.
+
+        One transaction that cannot be downloaded or valued never discards the others: it is
+        counted in ``missing`` and the rest are returned."""
         sigs = await self.list_signatures(
             wallet, since=since, until_signature=until_signature, max_signatures=max_signatures
         )
+        todo = [item for item in sigs if item["signature"] not in skip]
+        await self._load_sol_prices(todo)  # before spending RPC credits: fails early if prices are unreachable
         now = self.clock.now()
         failed: list[str] = []
 
@@ -124,14 +137,18 @@ class RpcHistorySource:
         async def one(item: dict[str, Any]) -> list[SwapEvent]:
             try:
                 tx = await self._patiently(lambda: get(item["signature"]))
+                if not tx:
+                    failed.append("transacción no disponible todavía")  # must be retried next time
+                    return []
+                bt = tx.get("blockTime")
+                sol_price = await self._patiently(lambda: self.sol_prices.sol_price_at(from_unix(bt))) if bt else None
             except CopyTraderError as exc:
                 failed.append(str(exc))
                 return []
-            if not tx:
-                failed.append("transacción no disponible todavía")  # must be retried next time
+            except Exception as exc:  # a bug must not throw away the rest of the wallet
+                log.exception("history_tx_unexpected_error", wallet=wallet, signature=item["signature"])
+                failed.append(type(exc).__name__)
                 return []
-            bt = tx.get("blockTime")
-            sol_price = await self.sol_prices.sol_price_at(from_unix(bt)) if bt else None
             try:
                 return parse_swaps(
                     tx,
@@ -145,7 +162,6 @@ class RpcHistorySource:
                 log.warning("history_parse_failed", wallet=wallet, signature=item["signature"], error=str(exc))
                 return []
 
-        todo = [item for item in sigs if item["signature"] not in skip]
         results = await asyncio.gather(*(one(item) for item in todo))
         self.missing[wallet] = len(failed)
         if failed:

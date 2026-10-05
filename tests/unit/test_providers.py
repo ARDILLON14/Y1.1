@@ -233,3 +233,30 @@ async def test_logs_subscribe_stream_subscribes_notifies_and_reconnects():
     assert any(m["method"] == "logsUnsubscribe" for m in server.sent)
     await stream.stop()
     await asyncio.wait_for(task, 2)
+
+
+@respx.mock
+async def test_sol_price_history_does_not_repeat_a_request_that_just_failed():
+    """1,000 transactions waiting on the same failing chunk must not each repeat the slow request."""
+    from copytrader.providers.prices import KlinesSolPriceHistory
+
+    route = respx.get("https://k.test/klines").mock(
+        side_effect=[httpx.Response(500), httpx.Response(200, json=[[1_750_000_000_000, "1", "1", "1", "150.5", "1"]])]
+    )
+    http = ResilientHttp(
+        "sol_price_history",
+        timeout=1,
+        rate_per_second=1000,
+        retry=RetryPolicy(1, 0.001, 0.001),
+        breaker=CircuitBreaker("s", 50, 1),
+    )
+    prices = KlinesSolPriceHistory(http, "https://k.test/klines")
+    when = datetime.fromtimestamp(1_750_000_000, tz=UTC)
+    with pytest.raises(ProviderError):
+        await prices.sol_price_at(when)
+    with pytest.raises(ProviderError, match="falló hace un momento"):
+        await prices.sol_price_at(when)
+    assert route.call_count == 1
+    prices._failed_at.clear()  # the pause is over
+    assert await prices.sol_price_at(when) == 150.5
+    assert route.call_count == 2

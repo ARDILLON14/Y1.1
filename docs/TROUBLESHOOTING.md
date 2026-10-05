@@ -85,6 +85,13 @@ Si el RPC falla de verdad (timeouts, 5xx) el circuito se abre durante
 historial espera a que se cierre y reintenta cada transacción (~100 s de
 paciencia) en lugar de descartarla.
 
+El precio histórico de SOL (para valorar cada swap en USD) se descarga una vez
+por wallet **antes** de pedir sus transacciones. Si `sol_price_history`
+(Binance) no responde, esa wallet se aplaza al ciclo siguiente sin gastar
+créditos del RPC (`backfill_failed` con `sol_price_history` en el error). Una
+transacción concreta que no se pueda valorar cuenta como `missing`: nunca
+descarta las demás.
+
 Progreso: la pantalla **Wallets** muestra «Descargando historial: N de M». En
 los logs, `backfill_done` es una wallet terminada y `backfill_incomplete` una
 que quedó con transacciones sin descargar (`missing`): el ciclo siguiente

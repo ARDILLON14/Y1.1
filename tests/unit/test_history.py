@@ -87,17 +87,36 @@ class FakeRpc:
 
 
 class FakeSolPrices:
+    """``series_errors``: raised in order by ``sol_series``; ``point_errors``: by ``sol_price_at``."""
+
+    def __init__(self, series_errors: list[Exception] | None = None, point_errors: list[Exception] | None = None):
+        self.series_errors = list(series_errors or [])
+        self.point_errors = list(point_errors or [])
+        self.series_calls = 0
+
     async def sol_price_at(self, ts: datetime) -> float:
+        if self.point_errors:
+            raise self.point_errors.pop(0)
         return 150.0
 
+    async def sol_series(self, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+        self.series_calls += 1
+        if self.series_errors:
+            raise self.series_errors.pop(0)
+        return [(start, 150.0)]
 
-def _source(rpc: FakeRpc, patience: tuple[float, ...] = (1.0, 2.0, 5.0)) -> tuple[RpcHistorySource, list[float]]:
+
+def _source(
+    rpc: FakeRpc, patience: tuple[float, ...] = (1.0, 2.0, 5.0), prices: FakeSolPrices | None = None
+) -> tuple[RpcHistorySource, list[float]]:
     slept: list[float] = []
 
     async def sleep(s: float) -> None:
         slept.append(s)
 
-    src = RpcHistorySource(rpc, FakeSolPrices(), quote_mints=[], patience=patience, sleep=sleep)  # type: ignore[arg-type]
+    src = RpcHistorySource(  # type: ignore[arg-type]
+        rpc, prices or FakeSolPrices(), quote_mints=[], patience=patience, sleep=sleep
+    )
     return src, slept
 
 
@@ -144,3 +163,33 @@ async def test_signature_listing_gives_up_after_its_patience():
     src, _ = _source(rpc, patience=(0.0, 0.0))
     with pytest.raises(CircuitOpenError):
         await src.fetch_swaps(WALLET)
+
+
+async def test_sol_price_failure_never_discards_the_downloaded_transactions():
+    """A SOL price lookup that fails for one transaction used to abort the whole wallet:
+    every transaction already downloaded (and paid for in RPC credits) was thrown away."""
+    rpc = FakeRpc(["s1", "s2", "s3"])
+    prices = FakeSolPrices(point_errors=[ProviderError("sol_price_history: timeout")] * 3)
+    src, _ = _source(rpc, patience=(0.0, 0.0), prices=prices)
+    swaps = await src.fetch_swaps(WALLET)
+    assert len(swaps) == 2 and src.missing[WALLET] == 1  # one could not be valued: retried next cycle
+    assert rpc.tx_calls == {"s1": 1, "s2": 1, "s3": 1}
+
+
+async def test_unreachable_sol_prices_stop_before_spending_credits():
+    rpc = FakeRpc(["s1", "s2"])
+    prices = FakeSolPrices(series_errors=[ProviderError("sol_price_history: timeout")] * 3)
+    src, _ = _source(rpc, patience=(0.0, 0.0), prices=prices)
+    with pytest.raises(ProviderError):
+        await src.fetch_swaps(WALLET)
+    assert rpc.tx_calls == {}  # no getTransaction was paid for
+    assert prices.series_calls == 3  # waited out its patience first
+
+
+async def test_sol_prices_are_loaded_once_for_the_whole_period():
+    rpc = FakeRpc(["s1", "s2", "s3"])
+    prices = FakeSolPrices(series_errors=[ProviderError("sol_price_history: timeout")])
+    src, slept = _source(rpc, prices=prices)
+    swaps = await src.fetch_swaps(WALLET)
+    assert len(swaps) == 3 and src.missing[WALLET] == 0
+    assert prices.series_calls == 2 and slept == [1.0]

@@ -13,10 +13,12 @@ from bisect import bisect_right
 from datetime import datetime, timedelta
 
 from copytrader.core.clock import from_unix
+from copytrader.core.errors import ProviderError
 from copytrader.resilience.http import ResilientHttp
 
 _HOUR_MS = 3_600_000
 _CHUNK = 1000  # candles per request
+_RETRY_AFTER_FAILURE = 10.0  # seconds
 
 
 class KlinesSolPriceHistory:
@@ -27,6 +29,7 @@ class KlinesSolPriceHistory:
         self._closes: dict[int, float] = {}  # hour index -> close
         self._loaded_chunks: set[int] = set()
         self._fetched_at: dict[int, float] = {}
+        self._failed_at: dict[int, float] = {}
         self._lock = asyncio.Lock()
 
     async def _ensure_chunk(self, chunk: int) -> None:
@@ -35,18 +38,25 @@ class KlinesSolPriceHistory:
         async with self._lock:
             if chunk in self._loaded_chunks or time.time() - self._fetched_at.get(chunk, 0.0) < 300:
                 return
+            # Just failed: do not make every waiting caller repeat the same slow request.
+            if time.time() - self._failed_at.get(chunk, 0.0) < _RETRY_AFTER_FAILURE:
+                raise ProviderError("sol_price_history: falló hace un momento", provider=self.http.name)
             start_ms = chunk * _CHUNK * _HOUR_MS
             end_ms = start_ms + _CHUNK * _HOUR_MS - 1
-            data = await self.http.get_json(
-                self.url,
-                params={
-                    "symbol": self.symbol,
-                    "interval": "1h",
-                    "startTime": start_ms,
-                    "endTime": end_ms,
-                    "limit": _CHUNK,
-                },
-            )
+            try:
+                data = await self.http.get_json(
+                    self.url,
+                    params={
+                        "symbol": self.symbol,
+                        "interval": "1h",
+                        "startTime": start_ms,
+                        "endTime": end_ms,
+                        "limit": _CHUNK,
+                    },
+                )
+            except ProviderError:
+                self._failed_at[chunk] = time.time()
+                raise
             for row in data or []:
                 try:
                     self._closes[int(row[0]) // _HOUR_MS] = float(row[4])
