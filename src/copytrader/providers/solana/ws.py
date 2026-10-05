@@ -30,6 +30,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from copytrader.core.clock import utcnow
 from copytrader.observability import metrics
+from copytrader.providers.solana.constants import MAX_SUPPORTED_TX_VERSION
 
 log = structlog.get_logger(__name__)
 
@@ -322,7 +323,7 @@ class HeliusTransactionStream(ReconnectingStream):
                             "encoding": "jsonParsed",
                             "transactionDetails": "full",
                             "showRewards": False,
-                            "maxSupportedTransactionVersion": 0,
+                            "maxSupportedTransactionVersion": MAX_SUPPORTED_TX_VERSION,
                         },
                     ],
                 }

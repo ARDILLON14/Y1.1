@@ -50,10 +50,27 @@ class NullSigner:
         return False
 
 
+def parse_supported_transaction(tx_bytes: bytes) -> Any:
+    """Legacy or v0 transaction, or ``SignerPolicyViolation``.
+
+    The policy can only judge a format it fully understands. A newer one (Solana
+    transaction v1, live since 2026-09-15) may still deserialize as *something*,
+    so the bytes must round-trip exactly: otherwise it is refused, never guessed."""
+    from solders.transaction import VersionedTransaction
+
+    try:
+        tx = VersionedTransaction.from_bytes(tx_bytes)
+    except Exception as exc:
+        raise SignerPolicyViolation(f"transacción ilegible: {type(exc).__name__}") from exc
+    if bytes(tx) != bytes(tx_bytes):
+        raise SignerPolicyViolation("formato de transacción no soportado (solo legacy y v0)")
+    return tx
+
+
 def sign_with_keypair(keypair: Any, tx_bytes: bytes, policy: SignerPolicy, intent: SignIntent) -> SignedTransaction:
     from solders.transaction import VersionedTransaction
 
-    tx = VersionedTransaction.from_bytes(tx_bytes)
+    tx = parse_supported_transaction(tx_bytes)
     policy.authorize(tx, intent)
     signed = VersionedTransaction(tx.message, [keypair])
     return SignedTransaction(tx_bytes=bytes(signed), signature=str(signed.signatures[0]))
@@ -116,9 +133,7 @@ class RemoteSigner:
     async def sign(self, tx_bytes: bytes, intent: SignIntent) -> SignedTransaction:
         if self._policy is not None:
             # Fail fast locally; the service enforces its own copy of the policy anyway.
-            from solders.transaction import VersionedTransaction
-
-            violations = self._policy.inspect(VersionedTransaction.from_bytes(tx_bytes), intent)
+            violations = self._policy.inspect(parse_supported_transaction(tx_bytes), intent)
             if violations:
                 raise SignerPolicyViolation("; ".join(violations))
         data = await self._call(

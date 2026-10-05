@@ -46,6 +46,10 @@ tokens Bearer, campos con nombres sensibles).
 - **Autenticación HMAC-SHA256** de cada petición con marca de tiempo y nonce
   de un solo uso: una petición capturada no se puede reproducir (anti-replay) y
   una petición fuera de la ventana de tiempo se rechaza.
+- **Solo formatos que entiende por completo** (legacy y v0): la transacción
+  debe volver a serializarse byte a byte igual. Un formato más nuevo (la
+  transacción v1 de Solana, activa desde el 15-09-2026) se rechaza en vez de
+  interpretarse a medias.
 - **Política independiente** antes de firmar: decodifica la transacción y
   rechaza si el pagador no es la wallet del bot o hay otros firmantes, si
   aparece un programa fuera de la lista permitida (Jupiter, compute budget,

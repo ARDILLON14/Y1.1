@@ -14,6 +14,12 @@ TOKEN_ACCOUNT_RENT_LAMPORTS = 2_039_280
 # SOL movements smaller than this are treated as noise (fees, rent rounding).
 SOL_DUST_LAMPORTS = 10_000
 
+# Highest transaction format we read (getTransaction, transactionSubscribe). Transaction v1
+# (larger transactions, compute budget in the message config) is live on mainnet since
+# 2026-09-15; asking with a lower value makes the RPC REJECT every v1 transaction
+# ("Transaction version (1) is not supported"). Must be the JSON integer, not a string.
+MAX_SUPPORTED_TX_VERSION = 1
+
 TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 

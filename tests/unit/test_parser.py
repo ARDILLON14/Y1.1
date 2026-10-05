@@ -247,3 +247,28 @@ def test_helius_notification_shape_and_fallback_time():
         notification, WALLET, sol_price_usd=100.0, fallback_time=now, detected_at=now, source=TxSource.STREAM
     )[0]
     assert s.signature == "sigH" and s.slot == 999 and s.block_time == now
+
+
+def test_transaction_v1_is_parsed_like_v0():
+    """v1 (live since 2026-09-15): no address lookup tables, compute budget in the message config;
+    balances and token balances come in meta exactly as before."""
+    spent, fee = 1_000_000_000, 5000
+    tx = make_tx(
+        [WALLET, "ata1", PUMP, "curve"],
+        [10_000_000_000, 0, 1, 5_000_000_000],
+        [
+            10_000_000_000 - spent - TOKEN_ACCOUNT_RENT_LAMPORTS - fee,
+            TOKEN_ACCOUNT_RENT_LAMPORTS,
+            1,
+            5_000_000_000 + spent,
+        ],
+        [],
+        [tb(1, MINT, WALLET, 1_000_000_000)],
+        fee=fee,
+        parsed_keys=False,
+    )
+    tx["version"] = 1
+    tx["meta"]["transactionConfig"] = {"computeUnitLimit": 200_000, "priorityFee": 1000, "heapSize": None}
+    swaps = parse_swaps(tx, WALLET, sol_price_usd=150.0)
+    assert len(swaps) == 1 and swaps[0].side is Side.BUY and swaps[0].token_amount == 1000.0
+    assert abs(swaps[0].quote_amount - 1.0) < 1e-9

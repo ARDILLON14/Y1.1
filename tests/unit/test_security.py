@@ -288,6 +288,18 @@ async def test_local_signer_signs_allowed_tx():
     assert all(tx.verify_with_results())
 
 
+async def test_signer_refuses_transaction_formats_it_cannot_fully_parse():
+    """Solana transaction v1 (serialized with a 0x81 prefix) may still deserialize as *something*:
+    the signer must refuse it rather than judge a misread message."""
+    kp = Keypair()
+    signer = LocalSigner(kp, SignerPolicy(owner=str(kp.pubkey())))
+    good = _jup_swap_tx(kp, wrap=1_000)
+    for bad in (b"\x81" + good[1:], good + b"\x00", b"\x81" + bytes(300)):
+        with pytest.raises(SignerPolicyViolation):
+            await signer.sign(bad, _intent())
+    await signer.sign(good, _intent())  # legacy/v0 round-trip exactly: still signed
+
+
 def test_jito_tip_accounts_are_valid_pubkeys():
     for acc in JITO_TIP_ACCOUNTS:
         Pubkey.from_string(acc)

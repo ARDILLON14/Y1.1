@@ -260,3 +260,23 @@ async def test_sol_price_history_does_not_repeat_a_request_that_just_failed():
     prices._failed_at.clear()  # the pause is over
     assert await prices.sol_price_at(when) == 150.5
     assert route.call_count == 2
+
+
+@respx.mock
+async def test_get_transaction_accepts_transaction_v1():
+    """Without maxSupportedTransactionVersion 1 (JSON integer) the RPC rejects every v1 transaction."""
+    from copytrader.providers.solana.rpc import SolanaRpc
+
+    route = respx.post("https://rpc.test/").mock(
+        return_value=httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"version": 1}})
+    )
+    http = ResilientHttp(
+        "solana_rpc",
+        timeout=1,
+        rate_per_second=1000,
+        retry=RetryPolicy(1, 0.001, 0.001),
+        breaker=CircuitBreaker("r", 5, 1),
+    )
+    assert await SolanaRpc(http, "https://rpc.test/").get_transaction("sig") == {"version": 1}
+    opts = json.loads(route.calls[0].request.content)["params"][1]
+    assert opts["maxSupportedTransactionVersion"] == 1 and isinstance(opts["maxSupportedTransactionVersion"], int)

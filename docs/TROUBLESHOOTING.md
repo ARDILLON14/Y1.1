@@ -73,6 +73,13 @@ desactivar un kill switch y aplicar/revertir configuración piden contraseña
 
 ## Datos y wallets
 
+**«Transaction version (1) is not supported»**
+Solana activó la transacción v1 el 15-09-2026. Las versiones anteriores del bot
+pedían `maxSupportedTransactionVersion: 0` y el RPC rechazaba cada transacción
+v1: faltaban muchas operaciones en el historial y en la detección en tiempo
+real. Actualiza (`git pull && make up`): ahora se pide la versión 1 y la
+migración 0005 vuelve a revisar el historial de las wallets una vez.
+
 **El backfill tarda horas / errores 429**
 El RPC gratuito limita las peticiones (Helius Free: 10 por segundo). Pon
 `providers.solana.rate_limit_per_second` un poco por debajo de tu plan (8 con

@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from copytrader.core.errors import ProviderError
-from copytrader.providers.solana.constants import SOL_MINT, TOKEN_2022_PROGRAM, TOKEN_PROGRAM
+from copytrader.providers.solana.constants import (
+    MAX_SUPPORTED_TX_VERSION,
+    SOL_MINT,
+    TOKEN_2022_PROGRAM,
+    TOKEN_PROGRAM,
+)
 from copytrader.resilience.http import ResilientHttp
 from copytrader.resilience.retry import RetryPolicy
 
@@ -58,7 +63,7 @@ class SolanaRpc:
                 signature,
                 {
                     "encoding": "jsonParsed",
-                    "maxSupportedTransactionVersion": 0,
+                    "maxSupportedTransactionVersion": MAX_SUPPORTED_TX_VERSION,
                     "commitment": commitment or self.commitment,
                 },
             ],
