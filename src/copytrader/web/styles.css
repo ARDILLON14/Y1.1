@@ -185,6 +185,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 16px 48px; outline: none
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: top; }
 th { font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+th[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 tbody tr:hover { background: var(--surface-2); }
 tr.clickable { cursor: pointer; }
 td.wrap { white-space: normal; min-width: 220px; }

@@ -155,7 +155,7 @@ export function askPassword(title, description) {
 export function table(columns, rows, { onRowClick = null, empty = "Sin datos" } = {}) {
   if (!rows.length) return h("div", { class: "empty" }, empty);
   return h("div", { class: "table-wrap" }, h("table", {},
-    h("thead", {}, h("tr", {}, columns.map((c) => h("th", { class: c.num ? "num" : "" }, c.label)))),
+    h("thead", {}, h("tr", {}, columns.map((c) => h("th", { class: c.num ? "num" : "", title: c.title || null }, c.label)))),
     h("tbody", {}, rows.map((r) => h("tr", {
       class: onRowClick ? "clickable" : "", onclick: onRowClick ? () => onRowClick(r) : null,
     }, columns.map((c) => h("td", { class: [c.num ? "num" : "", c.wrap ? "wrap" : ""].join(" ") }, c.render(r))))))));

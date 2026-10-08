@@ -32,14 +32,14 @@ export async function render(root) {
     h("div", { class: "card" }, table([
       { label: "#", num: true, render: (w) => w.rank ?? "—" },
       { label: "Wallet", render: (w) => addr(w.address, w.label) },
-      { label: "Estado", render: (w) => h("span", { title: (w.status_reasons || []).join("\n") }, walletStatus(w.status)) },
-      { label: "Copia", render: (w) => (w.selected ? h("span", { class: "badge" }, h("span", { class: "dot good" }), "Sí") : h("span", { class: "muted" }, "—")) },
-      { label: "Score", num: true, render: (w) => (w.score === null ? "—" : num(w.score, 1)) },
-      { label: "PnL", num: true, render: (w) => h("span", { class: signClass(w.metrics?.total_pnl_usd) }, usd(w.metrics?.total_pnl_usd, 0)) },
-      { label: "ROI", num: true, render: (w) => pct(w.metrics?.roi_pct, 1, true) },
-      { label: "Win rate", num: true, render: (w) => frac(w.metrics?.win_rate) },
-      { label: "PF", num: true, render: (w) => num(w.metrics?.profit_factor, 2) },
-      { label: "Copia est./op", num: true, render: (w) => {
+      { label: "Estado", title: "ACTIVA: se puede copiar. OBSERVAR: se sigue pero no se copia. BLOQUEADA: nunca. Pasa el ratón por el estado de cada wallet para ver el motivo.", render: (w) => h("span", { title: (w.status_reasons || []).join("\n") }, walletStatus(w.status)) },
+      { label: "Copia", title: "Sí = seleccionada: sus operaciones se copian (en papel o reales según el nivel).", render: (w) => (w.selected ? h("span", { class: "badge" }, h("span", { class: "dot good" }), "Sí") : h("span", { class: "muted" }, "—")) },
+      { label: "Score", num: true, title: "0-100. Con pocas operaciones se acerca a 40 (neutro): falta muestra. Para copiar hace falta el mínimo configurado (55 por defecto).", render: (w) => (w.score === null ? "—" : num(w.score, 1)) },
+      { label: "PnL", num: true, title: "Ganancia total en USD: operaciones cerradas + posiciones abiertas valoradas al precio actual (lo abierto aún no está ganado ni perdido).", render: (w) => h("span", { class: signClass(w.metrics?.total_pnl_usd) }, usd(w.metrics?.total_pnl_usd, 0)) },
+      { label: "ROI", num: true, title: "Rentabilidad solo de las operaciones cerradas (ganancia realizada / lo invertido en ellas).", render: (w) => pct(w.metrics?.roi_pct, 1, true) },
+      { label: "Win rate", num: true, title: "Porcentaje de operaciones cerradas con ganancia.", render: (w) => frac(w.metrics?.win_rate) },
+      { label: "PF", num: true, title: "Profit factor: lo ganado en las operaciones ganadoras / lo perdido en las perdedoras. Menos de 1 = pierde dinero.", render: (w) => num(w.metrics?.profit_factor, 2) },
+      { label: "Copia est./op", num: true, title: "Retorno medio estimado por operación si la copias tú (con tu retraso, tu tamaño y los costes). Una sola operación muy grande puede inflarlo.", render: (w) => {
         const m = w.metrics || {};
         const v = m.effective_copy_expectancy_pct ?? m.copy_expectancy_pct;
         const real = m.realized_copy_n ? ` Corregido con ${m.realized_copy_n} copias reales (estimación inicial ${pct(m.copy_expectancy_pct, 2, true)}).` : "";
@@ -48,8 +48,8 @@ export async function render(root) {
           title: `Retorno medio por operación si la copias (tu latencia, tamaño y costes). Su retorno: ${pct(m.expectancy_pct, 2, true)}.${real}`,
         }, pct(v, 2, true), m.realized_copy_n ? " ✓" : "");
       } },
-      { label: "Drawdown", num: true, render: (w) => pct(w.metrics?.max_drawdown_pct, 1) },
-      { label: "Ops", num: true, render: (w) => (w.backfilled ? w.metrics?.n_trades ?? "—"
+      { label: "Drawdown", num: true, title: "Peor caída desde un máximo de su resultado acumulado.", render: (w) => pct(w.metrics?.max_drawdown_pct, 1) },
+      { label: "Ops", num: true, title: "Operaciones cerradas (compra y venta del mismo token) en el periodo analizado.", render: (w) => (w.backfilled ? w.metrics?.n_trades ?? "—"
         : h("span", { class: "muted", title: "Descargando su historial" }, "descargando…")) },
       { label: "Última actividad", render: (w) => h("span", { class: "nowrap" }, ago(w.last_activity_at)) },
       { label: "Lista", render: (w) => listSelect(w, rerender) },
