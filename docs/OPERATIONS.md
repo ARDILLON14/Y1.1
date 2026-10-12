@@ -82,6 +82,13 @@ Coste: cada wallet necesita 1 llamada `getSignaturesForAddress` por cada
 ~100.000 llamadas la primera vez: con un RPC gratuito puede tardar horas; con
 un plan de pago, minutos. Las siguientes evaluaciones solo descargan lo nuevo.
 
+Cuánto pasado cubre: una wallet activa de memecoins hace 30-70 transacciones al
+día, así que 1.000 son unas 2 semanas y 4.000 unos 2 meses (el máximo que se
+analiza es `analysis.history_days`). Más historial da métricas más fiables a
+cambio de más créditos la primera vez. Si una wallet tiene muchas «ventas sin
+compra», `copytrader wallets explain <dirección>` dice de dónde vienen sus
+tokens ([TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
+
 Resultado en *Wallets*: score, estado (ACTIVA/OBSERVAR/BLOQUEADA) con motivos,
 métricas, si está seleccionada y **"Copia est./op"**: el retorno medio por
 operación que estimamos que obtendrías copiándola con tu latencia, tamaño y

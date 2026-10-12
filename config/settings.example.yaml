@@ -54,6 +54,8 @@ providers:
     get_transaction_retry_delay_ms: 100  # primera espera; crece x1,6 por intento hasta 1 s
     catchup_on_reconnect: true         # recupera operaciones perdidas tras una desconexión
     reconcile_poll_interval_seconds: 300   # red de seguridad (no es el mecanismo principal)
+    # Transacciones de historial por wallet (~1 crédito del RPC cada una). Una wallet activa de
+    # memecoins hace 30-70 al día: 1000 ≈ 2 semanas, 4000 ≈ 2 meses (analysis.history_days).
     backfill_max_signatures_per_wallet: 1000
     backfill_concurrency: 4
     rate_limit_per_second: 20         # ajústalo a tu plan, con margen: Helius Free (10/s) → 8
