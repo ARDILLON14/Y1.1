@@ -6,7 +6,7 @@ copytrader set-password              create/update the dashboard user
 copytrader totp-setup                enable TOTP 2FA for the dashboard user
 copytrader gen-secret                print strong random secrets
 copytrader keystore create|rotate    manage the encrypted bot keypair
-copytrader wallets add|import|list   manage tracked wallets
+copytrader wallets add|import|list|explain   manage tracked wallets
 copytrader backfill [--force]        download wallet history
 copytrader evaluate                  run one analysis/scoring/selection cycle
 copytrader backtest                  walk-forward backtest on stored history
@@ -200,6 +200,8 @@ async def cmd_wallets(args: argparse.Namespace) -> int:
             )
             for err in report.errors:
                 print("  -", err)
+        elif args.wallets_action == "explain":
+            return await _explain_wallet(c, args.address.strip(), args.limit)
         else:
             async with c.db.session() as s:
                 for w in await WalletRepo(s).list():
@@ -209,6 +211,53 @@ async def cmd_wallets(args: argparse.Namespace) -> int:
                     )
     finally:
         await c.aclose()
+    return 0
+
+
+def _tx_limit(value: str) -> int:
+    n = int(value)
+    if not 10 <= n <= 1000:
+        raise argparse.ArgumentTypeError("entre 10 y 1000")
+    return n
+
+
+async def _explain_wallet(c: Any, address: str, limit: int) -> int:
+    """Where the wallet's tokens come from: recognised buys, transfers, own tokens, blind spots."""
+    from copytrader.analysis.flows import FlowReport, classify_token_flows
+    from copytrader.core.clock import from_unix
+    from copytrader.core.errors import ParseError
+    from copytrader.providers.solana.constants import is_valid_address
+
+    rpc = c.providers.rpc
+    if rpc is None:
+        print("Hace falta providers.mode: live (datos reales de Solana).")
+        return 1
+    if not is_valid_address(address):
+        print(f"Dirección inválida: {address}")
+        return 1
+    print(f"Revisando las últimas {limit} transacciones de {address} (gasta ~{limit + 1} créditos del RPC)...")
+    sigs = [s for s in await rpc.get_signatures_for_address(address, limit=limit) if s.get("err") is None]
+    report = FlowReport(address)
+    sem = asyncio.Semaphore(4)
+
+    async def one(item: dict[str, Any]) -> None:
+        async with sem:
+            try:
+                tx = await rpc.get_transaction(item["signature"])
+            except CopyTraderError:
+                report.failed += 1
+                return
+        if not tx:
+            report.failed += 1
+            return
+        try:
+            flows = classify_token_flows(tx, address)
+        except ParseError:
+            flows = []
+        report.add(flows, from_unix(tx["blockTime"]) if tx.get("blockTime") else None)
+
+    await asyncio.gather(*(one(item) for item in sigs))
+    print(report.render())
     return 0
 
 
@@ -351,6 +400,9 @@ def build_parser() -> argparse.ArgumentParser:
     wi = w_sub.add_parser("import")
     wi.add_argument("file")
     w_sub.add_parser("list")
+    we = w_sub.add_parser("explain", help="de dónde vienen los tokens de una wallet (diagnóstico)")
+    we.add_argument("address")
+    we.add_argument("--limit", type=_tx_limit, default=300, help="transacciones a revisar (10-1000)")
     bf = sub.add_parser("backfill")
     bf.add_argument("--force", action="store_true")
     sub.add_parser("evaluate")

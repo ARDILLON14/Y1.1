@@ -104,39 +104,20 @@ class _TokenDelta:
         return raw / (10**self.decimals)
 
 
-def created_token_accounts(raw: Mapping[str, Any], wallet: str) -> list[str]:
-    """Mints of the token accounts owned by ``wallet`` that this transaction created."""
-    meta = normalize_transaction(raw).meta
-    pre = {int(b.get("accountIndex", -1)) for b in meta.get("preTokenBalances") or [] if b.get("owner") == wallet}
-    return [
-        str(b["mint"])
-        for b in meta.get("postTokenBalances") or []
-        if b.get("owner") == wallet and int(b.get("accountIndex", -1)) not in pre
-    ]
+@dataclass(slots=True)
+class WalletDeltas:
+    """What changed for ``wallet`` in one transaction.
+
+    ``sol_delta`` (lamports) already excludes the fee, Jito tips and token-account rent
+    when the wallet pays them; WSOL is still in ``tokens`` (callers fold it into SOL)."""
+
+    sol_delta: int
+    fee_sol: float
+    tokens: dict[str, _TokenDelta]
 
 
-def parse_swaps(
-    raw: Mapping[str, Any],
-    wallet: str,
-    *,
-    sol_price_usd: float | None,
-    quote_mints: Iterable[str] = (SOL_MINT, *STABLE_MINTS),
-    token_price_usd: Callable[[str], float | None] | None = None,
-    source: TxSource = TxSource.STREAM,
-    detected_at: datetime | None = None,
-    fallback_time: datetime | None = None,
-) -> list[SwapEvent]:
-    """Return the swaps ``wallet`` performed in this transaction (usually 0 or 1)."""
-    tx = normalize_transaction(raw)
-    meta = tx.meta
-    if meta.get("err") is not None:
-        return []
-    keys = tx.account_keys
-    if wallet not in keys:
-        return []
-    block_time = tx.block_time or fallback_time or detected_at
-    if block_time is None:
-        raise ParseError("transaction without blockTime and no fallback time")
+def wallet_balance_deltas(tx: NormalizedTx, wallet: str) -> WalletDeltas:
+    meta, keys = tx.meta, tx.account_keys
     idx = keys.index(wallet)
     pre_bal = meta.get("preBalances") or []
     post_bal = meta.get("postBalances") or []
@@ -179,6 +160,44 @@ def parse_swaps(
     closed = [m for i, m in pre_accounts.items() if i not in post_accounts]
     sol_delta += TOKEN_ACCOUNT_RENT_LAMPORTS * len(created)
     sol_delta -= TOKEN_ACCOUNT_RENT_LAMPORTS * len(closed)
+    return WalletDeltas(sol_delta=sol_delta, fee_sol=fee_sol, tokens=tokens)
+
+
+def created_token_accounts(raw: Mapping[str, Any], wallet: str) -> list[str]:
+    """Mints of the token accounts owned by ``wallet`` that this transaction created."""
+    meta = normalize_transaction(raw).meta
+    pre = {int(b.get("accountIndex", -1)) for b in meta.get("preTokenBalances") or [] if b.get("owner") == wallet}
+    return [
+        str(b["mint"])
+        for b in meta.get("postTokenBalances") or []
+        if b.get("owner") == wallet and int(b.get("accountIndex", -1)) not in pre
+    ]
+
+
+def parse_swaps(
+    raw: Mapping[str, Any],
+    wallet: str,
+    *,
+    sol_price_usd: float | None,
+    quote_mints: Iterable[str] = (SOL_MINT, *STABLE_MINTS),
+    token_price_usd: Callable[[str], float | None] | None = None,
+    source: TxSource = TxSource.STREAM,
+    detected_at: datetime | None = None,
+    fallback_time: datetime | None = None,
+) -> list[SwapEvent]:
+    """Return the swaps ``wallet`` performed in this transaction (usually 0 or 1)."""
+    tx = normalize_transaction(raw)
+    meta = tx.meta
+    if meta.get("err") is not None:
+        return []
+    keys = tx.account_keys
+    if wallet not in keys:
+        return []
+    block_time = tx.block_time or fallback_time or detected_at
+    if block_time is None:
+        raise ParseError("transaction without blockTime and no fallback time")
+    deltas = wallet_balance_deltas(tx, wallet)
+    sol_delta, fee_sol, tokens = deltas.sol_delta, deltas.fee_sol, deltas.tokens
 
     wsol = tokens.pop(SOL_MINT, None)
     if wsol is not None:

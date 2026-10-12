@@ -110,6 +110,20 @@ docker compose logs app | grep -cE '"event": "backfill_done"'       # wallets te
 docker compose logs app | grep -E 'backfill_incomplete|backfill_failed' | tail -5
 ```
 
+**Una wallet rinde mucho en pump.fun/GMGN pero aquí no, o tiene muchas «ventas sin compra»**
+El análisis solo cuenta operaciones que puede reconstruir (compra con SOL o
+stable y venta posterior). Para ver de dónde salen los tokens de una wallet:
+
+```bash
+docker compose exec app copytrader wallets explain <dirección> --limit 300
+```
+
+Separa compras reconocidas, tokens **creados por la propia wallet** (dev: no
+copiable), tokens **recibidos de otra wallet** (un operador con varias wallets:
+la compra está en otra), compras **no reconocidas** (un punto ciego del bot,
+con enlaces a Solscan para revisarlas) y airdrops/spam. Gasta ~1 crédito del
+RPC por transacción revisada.
+
 **Una wallet aparece con 0 operaciones**
 Solo se cuentan swaps que el parser entiende: compras/ventas contra SOL, USDC
 o USDT, o token↔token con precio conocido. Transferencias, NFTs, bots
