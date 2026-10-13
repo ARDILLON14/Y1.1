@@ -103,7 +103,7 @@ analysis:                             # [en caliente]
   history_days: 180
   recent_trades: 30                    # ventana "reciente" para detectar deterioro
   decay_half_life_days: 45             # peso del historial: vida media
-  min_trade_usd: 5                     # ignora operaciones de polvo
+  min_trade_usd: 5                     # operaciones completas (compra+venta) menores no se miden
   dust_fraction: 0.01
   stale_position_days: 30
   fast_trade_max_minutes: 60           # frontera "rápidas vs largas"

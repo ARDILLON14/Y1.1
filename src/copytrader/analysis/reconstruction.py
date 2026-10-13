@@ -7,6 +7,12 @@ All partial buys and sells in between belong to the same trade.
 Sells without a known prior buy (tokens acquired before the history window,
 via transfer or airdrop) have an unknown cost basis and are excluded from
 performance metrics — counting them would inflate PnL.
+
+Every swap moves the position, however small or unpriced: dropping one would
+leave the rest unmatched (small buys → "sells without a buy") or a position
+that never closes (small sells → a phantom open lot valued at today's price).
+``min_trade_usd`` therefore applies to the whole round trip, and a round trip
+with a swap of unknown USD value is tracked but left out of the metrics.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ class _Cycle:
     n_buys: int = 0
     n_sells: int = 0
     last_trade_at: datetime | None = None
+    unpriced: bool = False  # some swap had no USD value: quantities are right, money is not
 
 
 @dataclass(slots=True)
@@ -42,6 +49,8 @@ class Reconstruction:
     open_lots: list[OpenLot] = field(default_factory=list)
     unmatched_sells: int = 0
     unpriced_swaps: int = 0
+    dust_trades: int = 0  # round trips below min_trade_usd (tracked, not measured)
+    unpriced_trades: int = 0  # round trips with a swap of unknown USD value (tracked, not measured)
     peak_deployed_usd: float = 0.0
     n_swaps: int = 0
     n_buys: int = 0
@@ -68,29 +77,32 @@ def reconstruct(
             result.n_buys += 1
         else:
             result.n_sells += 1
-        if sw.value_usd is None or sw.value_usd <= 0 or sw.token_amount <= 0:
+        if sw.token_amount <= 0:
+            continue
+        usd = sw.value_usd if sw.value_usd is not None and sw.value_usd > 0 else None
+        if usd is None:
             result.unpriced_swaps += 1
-            continue
-        if sw.value_usd < min_trade_usd:
-            continue
         cyc = cycles.get(sw.token_mint)
         if sw.side is Side.BUY:
             if cyc is None:
                 cyc = _Cycle(
                     opened_at=sw.block_time,
-                    entry_price_usd=sw.value_usd / sw.token_amount,
+                    entry_price_usd=(usd or 0.0) / sw.token_amount,
                     liquidity_at_entry=sw.liquidity_usd,
-                    entry_value=sw.value_usd,
+                    entry_value=usd or 0.0,
                 )
                 cycles[sw.token_mint] = cyc
             cyc.qty += sw.token_amount
-            cyc.cost += sw.value_usd
-            cyc.cycle_cost += sw.value_usd
             cyc.max_qty = max(cyc.max_qty, cyc.qty)
             cyc.n_buys += 1
             cyc.last_trade_at = sw.block_time
-            deployed += sw.value_usd
-            result.peak_deployed_usd = max(result.peak_deployed_usd, deployed)
+            if usd is None:
+                cyc.unpriced = True
+            else:
+                cyc.cost += usd
+                cyc.cycle_cost += usd
+                deployed += usd
+                result.peak_deployed_usd = max(result.peak_deployed_usd, deployed)
             continue
 
         # SELL
@@ -98,9 +110,11 @@ def reconstruct(
             result.unmatched_sells += 1
             continue
         sell_qty = min(sw.token_amount, cyc.qty)
-        matched_proceeds = sw.value_usd * (sell_qty / sw.token_amount)
         cost_portion = cyc.cost * (sell_qty / cyc.qty)
-        cyc.proceeds += matched_proceeds
+        if usd is None:
+            cyc.unpriced = True
+        else:
+            cyc.proceeds += usd * (sell_qty / sw.token_amount)
         cyc.cost -= cost_portion
         cyc.qty -= sell_qty
         cyc.sold_qty += sell_qty
@@ -111,6 +125,13 @@ def reconstruct(
             result.unmatched_sells += 1  # part of this sell had no known cost basis
         if cyc.qty <= dust_fraction * cyc.max_qty:
             deployed = max(0.0, deployed - cyc.cost)
+            del cycles[sw.token_mint]
+            if cyc.unpriced:
+                result.unpriced_trades += 1
+                continue
+            if cyc.cycle_cost < min_trade_usd:
+                result.dust_trades += 1
+                continue
             pnl = cyc.proceeds - cyc.cycle_cost
             result.closed.append(
                 ClosedTrade(
@@ -133,10 +154,10 @@ def reconstruct(
                     exit_price_usd=cyc.proceeds / cyc.sold_qty if cyc.sold_qty > 0 else None,
                 )
             )
-            del cycles[sw.token_mint]
 
     for mint, cyc in cycles.items():
-        if cyc.qty > 0:
+        # An open position whose cost is unknown or below the dust threshold is not measured either.
+        if cyc.qty > 0 and not cyc.unpriced and cyc.cycle_cost >= min_trade_usd:
             result.open_lots.append(
                 OpenLot(
                     wallet=wallet,

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -81,6 +82,42 @@ def test_reconstruct_dust_closes_cycle():
     s = [swap("W", "A", Side.BUY, T0, 1000, 100), swap("W", "A", Side.SELL, T0 + timedelta(minutes=5), 995, 200)]
     r = reconstruct("W", s, dust_fraction=0.01)
     assert len(r.closed) == 1 and r.open_lots == []
+
+
+def test_reconstruct_small_buys_still_match_the_sell():
+    """A trader who buys in $3 pieces and sells once: dropping the small buys turned the sell into a
+    "sell without a buy" (one wallet showed 407 of them against 34 closed trades)."""
+    s = [swap("W", "A", Side.BUY, T0 + timedelta(minutes=i), 10, 3) for i in range(5)]
+    s.append(swap("W", "A", Side.SELL, T0 + timedelta(hours=1), 50, 30))
+    r = reconstruct("W", s, min_trade_usd=5)
+    assert r.unmatched_sells == 0 and r.open_lots == []
+    assert len(r.closed) == 1 and r.closed[0].cost_usd == 15 and r.closed[0].pnl_usd == 15
+
+
+def test_reconstruct_small_sells_close_the_position():
+    """Selling in small pieces must close it: otherwise a phantom open lot is valued at today's price."""
+    s = [swap("W", "A", Side.BUY, T0, 100, 100)]
+    s += [swap("W", "A", Side.SELL, T0 + timedelta(minutes=10 + i), 25, 4) for i in range(4)]
+    r = reconstruct("W", s, min_trade_usd=5)
+    assert r.open_lots == [] and r.unmatched_sells == 0
+    assert len(r.closed) == 1 and r.closed[0].proceeds_usd == 16
+
+
+def test_reconstruct_dust_round_trip_is_tracked_but_not_measured():
+    s = [swap("W", "A", Side.BUY, T0, 10, 2), swap("W", "A", Side.SELL, T0 + timedelta(minutes=5), 10, 3)]
+    s += [swap("W", "B", Side.BUY, T0, 10, 2)]
+    r = reconstruct("W", s, min_trade_usd=5)
+    assert r.closed == [] and r.dust_trades == 1 and r.unmatched_sells == 0
+    assert r.open_lots == []  # a $2 open position is dust too
+
+
+def test_reconstruct_unpriced_swap_keeps_quantities_right():
+    unpriced_buy = replace(swap("W", "A", Side.BUY, T0, 10, 1), value_usd=None)
+    s = [unpriced_buy, swap("W", "A", Side.BUY, T0 + timedelta(minutes=1), 10, 50)]
+    s.append(swap("W", "A", Side.SELL, T0 + timedelta(hours=1), 20, 200))
+    r = reconstruct("W", s)
+    assert r.unmatched_sells == 0 and r.open_lots == []  # the sell matched both buys
+    assert r.closed == [] and r.unpriced_trades == 1 and r.unpriced_swaps == 1  # PnL unknown: not measured
 
 
 # ------------------------------------------------------------------ metrics
