@@ -377,7 +377,9 @@ def incomplete_history(ctx: DetectionContext) -> Flag | None:
     return Flag(
         "INCOMPLETE_HISTORY",
         Severity.INFO,
-        f"{_pct(frac)} de sus ventas no tienen compra conocida en el historial analizado",
+        f"{_pct(frac)} de sus ventas son de tokens que no compró en el historial analizado: suele recibirlos de "
+        "otras wallets (no copiable) o comprarlos antes. Su resultado real no se puede medir bien; "
+        "detalle con `copytrader wallets explain`",
         {"fraction": frac},
     )
 

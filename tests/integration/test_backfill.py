@@ -118,3 +118,64 @@ async def test_explain_lists_tokens_sold_without_a_stored_buy(container, capsys)
     out = capsys.readouterr().out
     assert "2 tokens · 1 comprados y vendidos · 1 vendidos sin compra guardada (2 ventas)" in out
     assert "DezX…B263 (2 ventas): origen no encontrado" in out and "Resumen: 1 origen no encontrado" in out
+
+
+async def test_explain_separates_old_buys_from_gaps_and_names_senders(container, capsys):
+    from copytrader.cli import _explain_unmatched_sells
+    from tests.unit.test_flows import OTHER, POOL, SOL, tb, tx
+
+    c = container
+    await c.collector.add_wallet(WALLET)
+    t = c.clock.now() - timedelta(days=1)
+    gifted = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    old = MINT  # bought long before the stored history
+    async with c.db.session() as s:
+        wid = (await WalletRepo(s).get_by_address(WALLET)).id
+    await c.collector.store_swaps(
+        wid,
+        [
+            swap(WALLET, gifted, Side.SELL, t, 5, 50, sig="sell_gift"),
+            swap(WALLET, gifted, Side.SELL, t + timedelta(minutes=1), 5, 50, sig="sell_gift2"),
+            swap(WALLET, old, Side.SELL, t + timedelta(hours=1), 5, 50, sig="sell_old"),
+        ],
+    )
+
+    def sell(mint):
+        return tx(
+            [WALLET, "ata_" + mint[:4], POOL, "vault"],
+            [SOL, 0, 2 * SOL, 0],
+            [2 * SOL, 0, SOL, 0],
+            [tb(1, mint, WALLET, 500), tb(3, mint, POOL, 0)],
+            [tb(1, mint, WALLET, 0), tb(3, mint, POOL, 500)],
+        )
+
+    gift = tx(
+        [OTHER, WALLET, "src", "ata_" + gifted[:4]],
+        [SOL, SOL, 0, 0],
+        [SOL - 5000, SOL, 0, 0],
+        [tb(2, gifted, OTHER, 500), tb(3, gifted, WALLET, 0)],
+        [tb(2, gifted, OTHER, 0), tb(3, gifted, WALLET, 500)],
+        sig="gift",
+    )
+    bought = tx(
+        [WALLET, "ata_" + old[:4], POOL, "vault"],
+        [10 * SOL, 0, SOL, 0],
+        [9 * SOL, 0, 2 * SOL, 0],
+        [tb(1, old, WALLET, 0), tb(3, old, POOL, 1000)],
+        [tb(1, old, WALLET, 500), tb(3, old, POOL, 500)],
+        sig="bought",
+    )  # blockTime in 2025: long before the stored history
+
+    class Rpc:
+        async def get_transaction(self, signature):
+            return {"sell_gift2": sell(gifted), "sell_old": sell(old), "gift": gift, "bought": bought}.get(signature)
+
+        async def get_signatures_for_address(self, address, **kw):
+            first = "gift" if address == "ata_" + gifted[:4] else "bought"
+            return [{"signature": first, "err": None}]
+
+    await _explain_unmatched_sells(c, Rpc(), WALLET, orphans=5)
+    out = capsys.readouterr().out
+    assert "antes del historial descargado" in out and "NO guardó" not in out
+    assert f"recibido de {OTHER[:4]}…{OTHER[-4:]}" in out
+    assert f"  {OTHER}  (1 tokens)" in out  # full address, ready to be analysed

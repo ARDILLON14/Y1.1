@@ -280,6 +280,9 @@ async def _explain_unmatched_sells(c: Any, rpc: Any, address: str, orphans: int)
             return
         activity = await TransactionRepo(s).token_activity(wallet.id, since)
         stored = await TransactionRepo(s).signatures_for_wallet(wallet.id)
+        first = await TransactionRepo(s).first_swap_at(wallet.id)
+    # What the bot could have seen: the analysis window, or later if the download did not reach that far.
+    covered_since = max(since, first) if first else since
     sold_only = sorted(
         ((m, a) for m, a in activity.items() if a["sells"] and not a["buys"]), key=lambda item: -item[1]["sells"]
     )
@@ -293,12 +296,19 @@ async def _explain_unmatched_sells(c: Any, rpc: Any, address: str, orphans: int)
     sample = sold_only[:orphans]
     print(f"De dónde salieron {len(sample)} de esos tokens (los más vendidos):")
     kinds: Counter[str] = Counter()
+    senders: Counter[str] = Counter()
     for mint, a in sample:
         origin = await trace_origin(rpc, address, mint, a["sell_signature"])
-        kind, line = describe_origin(origin, analysed_since=since, stored=stored)
+        kind, line = describe_origin(origin, analysed_since=covered_since, stored=stored)
         kinds[kind] += 1
+        if kind == "transfer_in" and origin.counterpart:
+            senders[origin.counterpart] += 1
         print(f"  {mint[:4]}…{mint[-4:]} ({a['sells']} ventas): {line}")
     print("Resumen: " + " · ".join(f"{n} {ORIGIN_LABELS[k]}" for k, n in kinds.most_common()))
+    if senders:
+        print("Wallets que le enviaron esos tokens (dirección completa, para analizarlas):")
+        for who, n in senders.most_common(3):
+            print(f"  {who}  ({n} tokens)")
 
 
 async def cmd_backfill(args: argparse.Namespace) -> int:

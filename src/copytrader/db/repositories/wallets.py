@@ -209,6 +209,10 @@ class TransactionRepo:
                 entry["sells"], entry["sell_signature"] = int(n), sig
         return out
 
+    async def first_swap_at(self, wallet_id: int) -> datetime | None:
+        stmt = select(func.min(WalletTransaction.block_time)).where(WalletTransaction.wallet_id == wallet_id)
+        return (await self.s.execute(stmt)).scalar_one_or_none()
+
     async def count_for_wallet(self, wallet_id: int) -> int:
         stmt = select(func.count()).select_from(WalletTransaction).where(WalletTransaction.wallet_id == wallet_id)
         return int((await self.s.execute(stmt)).scalar_one())

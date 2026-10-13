@@ -222,7 +222,7 @@ async def trace_origin(rpc: _Rpc, wallet: str, mint: str, sell_signature: str, *
 
 
 ORIGIN_LABELS = {
-    "before_window": "comprados antes del periodo analizado",
+    "before_window": "comprados antes del historial descargado",
     "buy_not_stored": "compras que el bot NO guardó (fallo del bot)",
     "buy_stored": "compras guardadas",
     "transfer_in": "recibidos de otra wallet sin pagar",
@@ -238,7 +238,8 @@ def describe_origin(origin: Origin, *, analysed_since: datetime, stored: set[str
     when = f"{origin.when:%d/%m}" if origin.when else "?"
     if origin.kind == "buy":
         if origin.when and origin.when < analysed_since:
-            return "before_window", f"comprado el {when}, antes del periodo analizado"
+            start = f"{analysed_since:%d/%m}"
+            return "before_window", f"comprado el {when}, antes del historial descargado (empieza el {start})"
         if origin.signature in stored:
             return "buy_stored", f"comprado el {when} (la compra sí está guardada)"
         return (
