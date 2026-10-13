@@ -82,3 +82,39 @@ async def test_history_that_never_completes_is_accepted_after_the_last_attempt(c
         assert not await _backfilled(c)
     await c.collector.backfill(WALLET)
     assert await _backfilled(c)  # stop spending RPC credits on it
+
+
+async def test_explain_lists_tokens_sold_without_a_stored_buy(container, capsys):
+    from copytrader.cli import _explain_unmatched_sells
+
+    c = container
+    await c.collector.add_wallet(WALLET)
+    t = c.clock.now() - timedelta(days=1)
+    other = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    async with c.db.session() as s:
+        wid = (await WalletRepo(s).get_by_address(WALLET)).id
+    await c.collector.store_swaps(
+        wid,
+        [
+            swap(WALLET, MINT, Side.BUY, t, 10, 100, sig="b1"),
+            swap(WALLET, MINT, Side.SELL, t + timedelta(hours=1), 10, 150, sig="s1"),
+            swap(WALLET, other, Side.SELL, t + timedelta(hours=2), 5, 50, sig="s2"),
+            swap(WALLET, other, Side.SELL, t + timedelta(hours=3), 5, 50, sig="s3"),
+        ],
+    )
+    async with c.db.session() as s:
+        activity = await TransactionRepo(s).token_activity(wid)
+    assert activity[MINT]["buys"] == 1 and activity[MINT]["sells"] == 1
+    assert activity[other]["buys"] == 0 and activity[other]["sells"] == 2 and activity[other]["sell_signature"] == "s3"
+
+    class NoNetwork:
+        async def get_transaction(self, signature):
+            return None
+
+        async def get_signatures_for_address(self, address, **kw):
+            return []
+
+    await _explain_unmatched_sells(c, NoNetwork(), WALLET, orphans=5)
+    out = capsys.readouterr().out
+    assert "2 tokens · 1 comprados y vendidos · 1 vendidos sin compra guardada (2 ventas)" in out
+    assert "DezX…B263 (2 ventas): origen no encontrado" in out and "Resumen: 1 origen no encontrado" in out

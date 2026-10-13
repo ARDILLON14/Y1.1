@@ -201,7 +201,7 @@ async def cmd_wallets(args: argparse.Namespace) -> int:
             for err in report.errors:
                 print("  -", err)
         elif args.wallets_action == "explain":
-            return await _explain_wallet(c, args.address.strip(), args.limit)
+            return await _explain_wallet(c, args.address.strip(), args.limit, args.orphans)
         else:
             async with c.db.session() as s:
                 for w in await WalletRepo(s).list():
@@ -221,7 +221,7 @@ def _tx_limit(value: str) -> int:
     return n
 
 
-async def _explain_wallet(c: Any, address: str, limit: int) -> int:
+async def _explain_wallet(c: Any, address: str, limit: int, orphans: int = 0) -> int:
     """Where the wallet's tokens come from: recognised buys, transfers, own tokens, blind spots."""
     from copytrader.analysis.flows import FlowReport, classify_token_flows
     from copytrader.core.clock import from_unix
@@ -258,7 +258,47 @@ async def _explain_wallet(c: Any, address: str, limit: int) -> int:
 
     await asyncio.gather(*(one(item) for item in sigs))
     print(report.render())
+    if orphans:
+        await _explain_unmatched_sells(c, rpc, address, orphans)
     return 0
+
+
+async def _explain_unmatched_sells(c: Any, rpc: Any, address: str, orphans: int) -> None:
+    """Tokens the wallet sold whose purchase the bot does not have, and how each one got there."""
+    from collections import Counter
+    from datetime import timedelta
+
+    from copytrader.analysis.flows import ORIGIN_LABELS, describe_origin, trace_origin
+    from copytrader.db.repositories import TransactionRepo, WalletRepo
+
+    days = c.cfg.analysis.history_days
+    since = c.clock.now() - timedelta(days=days)
+    async with c.db.session() as s:
+        wallet = await WalletRepo(s).get_by_address(address)
+        if wallet is None:
+            print("\n(No está en tu lista de wallets: no hay datos guardados que revisar.)")
+            return
+        activity = await TransactionRepo(s).token_activity(wallet.id, since)
+        stored = await TransactionRepo(s).signatures_for_wallet(wallet.id)
+    sold_only = sorted(
+        ((m, a) for m, a in activity.items() if a["sells"] and not a["buys"]), key=lambda item: -item[1]["sells"]
+    )
+    both = sum(1 for a in activity.values() if a["buys"] and a["sells"])
+    print(
+        f"\nGuardado por el bot (últimos {days} días): {len(activity)} tokens · {both} comprados y vendidos · "
+        f"{len(sold_only)} vendidos sin compra guardada ({sum(a['sells'] for _, a in sold_only)} ventas)"
+    )
+    if not sold_only:
+        return
+    sample = sold_only[:orphans]
+    print(f"De dónde salieron {len(sample)} de esos tokens (los más vendidos):")
+    kinds: Counter[str] = Counter()
+    for mint, a in sample:
+        origin = await trace_origin(rpc, address, mint, a["sell_signature"])
+        kind, line = describe_origin(origin, analysed_since=since, stored=stored)
+        kinds[kind] += 1
+        print(f"  {mint[:4]}…{mint[-4:]} ({a['sells']} ventas): {line}")
+    print("Resumen: " + " · ".join(f"{n} {ORIGIN_LABELS[k]}" for k, n in kinds.most_common()))
 
 
 async def cmd_backfill(args: argparse.Namespace) -> int:
@@ -403,6 +443,9 @@ def build_parser() -> argparse.ArgumentParser:
     we = w_sub.add_parser("explain", help="de dónde vienen los tokens de una wallet (diagnóstico)")
     we.add_argument("address")
     we.add_argument("--limit", type=_tx_limit, default=300, help="transacciones a revisar (10-1000)")
+    we.add_argument(
+        "--orphans", type=int, default=10, help="tokens vendidos sin compra guardada a rastrear (0 = ninguno)"
+    )
     bf = sub.add_parser("backfill")
     bf.add_argument("--force", action="store_true")
     sub.add_parser("evaluate")

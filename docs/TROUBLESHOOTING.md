@@ -124,6 +124,12 @@ la compra está en otra), compras **no reconocidas** (un punto ciego del bot,
 con enlaces a Solscan para revisarlas) y airdrops/spam. Gasta ~1 crédito del
 RPC por transacción revisada.
 
+Además rastrea los tokens que la wallet **vendió sin que el bot tenga su
+compra** (`--orphans 10` por defecto, ~4 créditos cada uno) y dice de dónde
+salió cada uno: comprado antes del periodo analizado, compra que el bot no
+guardó (un fallo del bot, con enlace), recibido de otra wallet, creado por la
+propia wallet o airdrop.
+
 **Una wallet aparece con 0 operaciones**
 Solo se cuentan swaps que el parser entiende: compras/ventas contra SOL, USDC
 o USDT, o token↔token con precio conocido. Transferencias, NFTs, bots

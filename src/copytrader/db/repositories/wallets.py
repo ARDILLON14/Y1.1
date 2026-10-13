@@ -190,6 +190,25 @@ class TransactionRepo:
             stmt = stmt.where(WalletTransaction.block_time >= since)
         return set((await self.s.execute(stmt)).scalars().all())
 
+    async def token_activity(self, wallet_id: int, since: datetime | None = None) -> dict[str, dict[str, Any]]:
+        """Per token: number of buys and sells, first buy, and one sell signature (diagnostics)."""
+        t = WalletTransaction
+        stmt = (
+            select(t.token_mint, t.side, func.count(), func.min(t.block_time), func.max(t.signature))
+            .where(t.wallet_id == wallet_id)
+            .group_by(t.token_mint, t.side)
+        )
+        if since is not None:
+            stmt = stmt.where(t.block_time >= since)
+        out: dict[str, dict[str, Any]] = {}
+        for mint, side, n, first, sig in (await self.s.execute(stmt)).all():
+            entry = out.setdefault(mint, {"buys": 0, "sells": 0, "first_buy": None, "sell_signature": None})
+            if side == Side.BUY.value:
+                entry["buys"], entry["first_buy"] = int(n), first
+            else:
+                entry["sells"], entry["sell_signature"] = int(n), sig
+        return out
+
     async def count_for_wallet(self, wallet_id: int) -> int:
         stmt = select(func.count()).select_from(WalletTransaction).where(WalletTransaction.wallet_id == wallet_id)
         return int((await self.s.execute(stmt)).scalar_one())

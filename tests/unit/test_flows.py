@@ -178,3 +178,77 @@ async def test_explain_command_reads_the_wallet_history(capsys):
     out = capsys.readouterr().out
     assert "Transacciones revisadas: 1" in out and "No se pudieron descargar: 1" in out
     assert "    1  compras reconocidas" in out
+
+
+class TraceRpc:
+    """Sell tx → wallet token account "ata" → its history (newest first) → the oldest is ``first``."""
+
+    def __init__(self, first: dict[str, Any]) -> None:
+        self.sell = tx(
+            [WALLET, "ata", POOL, "vault"],
+            [SOL, 0, 2 * SOL, 0],
+            [2 * SOL, 0, SOL, 0],
+            [tb(1, MINT, WALLET, 500), tb(3, MINT, POOL, 0)],
+            [tb(1, MINT, WALLET, 0), tb(3, MINT, POOL, 500)],
+            sig="sell",
+        )
+        self.first = first
+
+    async def get_transaction(self, signature):
+        return {"sell": self.sell, "old": self.first, "mid": self.sell}.get(signature)
+
+    async def get_signatures_for_address(self, address, *, before=None, until=None, limit=1000):
+        assert address == "ata"
+        return [
+            {"signature": "sell", "err": None},
+            {"signature": "mid", "err": None},
+            {"signature": "old", "err": None},
+        ]
+
+
+async def test_origin_of_a_token_received_from_another_wallet():
+    from copytrader.analysis.flows import describe_origin, trace_origin
+
+    first = tx(
+        [OTHER, WALLET, "src", "ata"],
+        [SOL, SOL, 0, 0],
+        [SOL - 5000, SOL, 0, 0],
+        [tb(2, MINT, OTHER, 500), tb(3, MINT, WALLET, 0)],
+        [tb(2, MINT, OTHER, 0), tb(3, MINT, WALLET, 500)],
+        sig="old",
+    )
+    origin = await trace_origin(TraceRpc(first), WALLET, MINT, "sell")
+    assert origin.kind == "transfer_in" and origin.counterpart == OTHER
+    kind, text = describe_origin(origin, analysed_since=datetime(2020, 1, 1, tzinfo=UTC), stored=set())
+    assert kind == "transfer_in" and "sin pagar" in text
+
+
+async def test_origin_of_a_bought_token_tells_window_and_gaps_apart():
+    from copytrader.analysis.flows import describe_origin, trace_origin
+
+    first = tx(
+        [WALLET, "ata", POOL, "vault"],
+        [10 * SOL, 0, SOL, 0],
+        [9 * SOL - 5000, 0, 2 * SOL, 0],
+        [tb(1, MINT, WALLET, 0), tb(3, MINT, POOL, 1000)],
+        [tb(1, MINT, WALLET, 500), tb(3, MINT, POOL, 500)],
+        sig="old",
+    )
+    origin = await trace_origin(TraceRpc(first), WALLET, MINT, "sell")
+    assert origin.kind == "buy" and origin.signature == "old"
+    bought = datetime.fromtimestamp(1_750_000_000, tz=UTC)
+    before = describe_origin(origin, analysed_since=bought.replace(year=bought.year + 1), stored=set())
+    missing = describe_origin(origin, analysed_since=bought.replace(year=bought.year - 1), stored=set())
+    kept = describe_origin(origin, analysed_since=bought.replace(year=bought.year - 1), stored={"old"})
+    assert before[0] == "before_window" and missing[0] == "buy_not_stored" and kept[0] == "buy_stored"
+    assert "solscan.io/tx/old" in missing[1]
+
+
+async def test_origin_not_found_never_raises():
+    from copytrader.analysis.flows import trace_origin
+
+    class Broken(TraceRpc):
+        async def get_transaction(self, signature):
+            return None
+
+    assert (await trace_origin(Broken({}), WALLET, MINT, "sell")).kind == "not_found"
